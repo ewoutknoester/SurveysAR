@@ -1,0 +1,470 @@
+---
+title: "Fragment survival"
+author: "Ewout Knoester"
+date: "11/08/2022"
+output: html_document
+---
+
+#TODO: Layout of Treatment x Genus graph & Add sample numbers
+#TODO: Add model for Structure x Size
+#TODO: Layout of death graphs (numbers, colours, legend)
+#TODO: Decide whether to show Treatment in most graphs or Structure type (ie not show compound mix) and adjust graphs accordingly
+
+```{r setup}
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+
+library(plyr) # Join data frames (vlookup)
+library(readxl)
+library(betareg) # Beta regression
+library(writexl) # Export Excel
+library(data.table)
+library(stringr) # Select text from string
+library(nlme) # GLS
+library(lme4) # Gamma
+library(DHARMa) # glm model validation
+library(panelr) # Convert data from wide to long
+library(tidyverse) # Data manipulation and plotting
+library(ggthemes) # Pretty plots
+library(emmeans) # Pairwise comparisons
+library(multcompView) # Significance letters to plots
+library(NCmisc) # Check packages used
+
+# Function to facilitate averaging data frame
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      sd = sd(x[[col]], na.rm=TRUE),
+      sum  = sum(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+```
+
+
+# Data selection (preparing dataset for archiving & sharing)
+```{r data loading}
+
+# Load raw data
+df0.raw <- read_excel("Structural complexity_Fragment survival_2022-08.xlsx")
+
+# Convert to long data frame
+df1.clean <- as.data.frame(long_panel(df0.raw, prefix = "_", begin = 0, end = 1, label_location = "end"))
+df1.clean <- select(df1.clean, -c("id", "Experiment"))
+df1.clean <- df1.clean %>% rename(Time = wave)
+df1.clean <- df1.clean %>% rename(Cause.death = Comments)
+
+# Fill NAs with appropriate values
+df1.clean$Cause[is.na(df1.clean$Cause)] <- "Alive"
+df1.clean$Cause.death[is.na(df1.clean$Cause.death)] <- ""
+
+# Remove fragments that were not present at the start measurement
+df1.clean <- df1.clean[df1.clean$Genus != "NA", ]    
+
+# Set variables right
+df1.clean$Patch <- as.factor(df1.clean$Patch)
+df1.clean$Structure <- as.factor(df1.clean$Structure)
+df1.clean$Species <- as.factor(paste(df1.clean$Genus, df1.clean$Species, sep = " "))
+df1.clean$Size <- factor(df1.clean$Size, ordered = TRUE, levels = c("Small", "Medium", "Large"))
+df1.clean <- df1.clean %>% add_column(Survival = ifelse(df1.clean$Condition > 0, 1, 0), .after = "Condition" )
+df1.clean$Treatment <- as.factor(ifelse(grepl("BRU", df1.clean$Patch), "BRU", 
+                       ifelse(grepl("CAKE", df1.clean$Patch), "Cake",
+                       ifelse(grepl("CAGE", df1.clean$Patch), "Cage",       
+                       ifelse(grepl("COMP", df1.clean$Patch), "Compound",
+                       ifelse(grepl("\\(", df1.clean$Patch), "Reference (+)", "Reference (-)"))))))
+df1.clean$Cause.death <- as.factor(df1.clean$Cause.death)
+
+```
+
+# Data cleaning
+```{r cleaning}
+
+# Select end date only
+df2.surv <- df1.clean[df1.clean$Time == 1, ]
+
+# Disks only per Treatment
+df2.surv.d <- df2.surv[df2.surv$Structure == "DISK", ]
+# Select only Acropora, because Pocillopora and Porites mostly died due to bleaching (not relevant for the Disks)
+df2.surv.d <- df2.surv.d[df2.surv.d$Genus == "Acropora", ]
+df3.Patch.d <- data_summary(df2.surv.d, varname = "Survival", groupnames = c("Treatment", "Patch", "Genus"))
+df3.Treatment.d <- data_summary(df2.surv.d, varname = "Survival", groupnames = c("Treatment", "Genus"))
+df3.Treatment.d <- select(df3.Treatment.d, -c("sd", "sum"))
+
+# Deselect disks (ie focus from here onwards on ARs only)
+df2.surv.nd <- df2.surv[df2.surv$Structure != "DISK", ]
+
+# Overall survival
+Total.fragments.nd <- as.numeric(nrow(df2.surv.nd))
+Overall.survival.nd <- sum(df2.surv.nd$Survival)/ Total.fragments.nd * 100
+Overall.condition.nd <- mean(df2.surv.nd$Condition)
+
+# Survival per Structure type
+df3.Structure  <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Treatment" ,"Patch", "Structure", "Number"))
+## Average over individual structures (assuming roughly equal fragments within each AR type)
+df3.Structure <- data_summary(df3.Structure, varname = "Survival", groupnames = c("Treatment" ,"Patch", "Structure"))
+df3.Structure.avg <- data_summary(df3.Structure, varname = "Survival", groupnames = c("Structure"))
+
+# Survival per Patch (not averaged per Structure first, so relative size differences of AR types are taken into account)
+df3.Patch <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Treatment" ,"Patch"))
+
+# Survival per Treatment (averaged per Patch, assuming each patch had roughly equal number of start fragments)
+df3.Treatment <- data_summary(df3.Patch, varname = "Survival", groupnames = c("Treatment"))
+df3.Treatment <- select(df3.Treatment, -c("sd", "sum"))
+
+# Survival by Genus x Structure
+df2.surv.nd$Genus[df2.surv.nd$Genus == "Isopora"] <- "Acropora"
+df3.StructurexGenus <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Structure", "Genus"))
+
+# Survival by Size x Treatment
+df3.SizexTreatment <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Size", "Structure"))
+
+# Cause of death
+## Assuming all missing fragments died, then got lost
+df3.death <- df2.surv.nd[df2.surv.nd$Survival == 0, ]
+df3.death$Dead <- 1
+Total.fragments.nd.dead <- as.numeric(nrow(df3.death))
+# Overall
+df3.Dead.Overall <- data_summary(df3.death, varname = "Dead", groupnames = c("Cause.death"))
+df3.Dead.Overall$Pct <- df3.Dead.Overall$sum/ Total.fragments.nd.dead * 100
+df3.Dead.Overall <- select(df3.Dead.Overall, c("Cause.death", "n", "Pct"))
+# Cause x Treatment
+df3.Dead.byTreatment <- data_summary(df3.death, varname = "Dead", groupnames = c("Treatment" ,"Cause.death"))
+df3.Dead.byTreatment$Pct <- df3.Dead.byTreatment$sum/ Total.fragments.nd.dead * 100
+df3.Dead.byTreatment <- select(df3.Dead.byTreatment, c("Treatment" ,"Cause.death", "n", "Pct"))
+df3.Dead.byTreatment$Cause.death <- factor(df3.Dead.byTreatment$Cause.death, ordered = TRUE, levels = c("Predation cots", "Predation snail", "Coral", "Soft coral", "Sponge", "Tunicate", "Turtle", "Fishing", "Toppled", "Bleaching", "Unknown"))
+levels(df3.Dead.byTreatment$Cause.death) <- c("COTS", "Snails", "Hard coral", "Soft coral", "Sponge", "Tunicate", "Turtle", "Fishing", "Toppled", "Bleaching", "Unknown")
+# Cause x Genus
+df3.Dead.byGenus <- data_summary(df3.death, varname = "Dead", groupnames = c("Genus" ,"Cause.death"))
+df3.Dead.byGenus$Pct <- df3.Dead.byGenus$sum/ Total.fragments.nd.dead * 100
+df3.Dead.byGenus <- select(df3.Dead.byGenus, c("Genus" ,"Cause.death", "n", "Pct"))
+df3.Dead.byGenus$Cause.death <- factor(df3.Dead.byGenus$Cause.death, ordered = TRUE, levels = c("Predation cots", "Predation snail", "Coral", "Soft coral", "Sponge", "Tunicate", "Turtle", "Fishing", "Toppled", "Bleaching", "Unknown"))
+levels(df3.Dead.byGenus$Cause.death) <- c("COTS", "Snails", "Hard coral", "Soft coral", "Sponge", "Tunicate", "Turtle", "Fishing", "Toppled", "Bleaching", "Unknown")
+
+```
+
+# Data exploration
+```{r data exploration}
+
+# Data per Patch normal, Data per structure not
+hist(df3.Structure$Survival) # Per structure (averaged per patch)
+hist(df3.Patch$Survival) # Per patch (structures pooled)
+```
+
+# Models
+```{r models}
+
+# ---- TREATMENT DISKS ONLY ----
+## Using Patch averages instead of individual Structures, because of distribution
+### Linear model
+### Beta regression (because fraction)
+### Transformation needed, because of exact 0s and 1s
+df3.Patch.d <- df3.Patch.d %>% 
+  mutate(Survival = (Survival * (length(Survival) - 1) + 0.5) / length(Survival))
+
+bm.TD1 <- betareg(Survival ~ Treatment, data = df3.Patch.d)
+
+### Variable precision
+bm.TD1b <- betareg(Survival ~ Treatment | Treatment, data = df3.Patch.d)
+
+car::Anova(bm.TD1b) 
+
+# ---- TREATMENT ----
+## Using Patch averages instead of individual Structures, because of distribution
+### Linear model
+### Beta regression (because fraction)
+### No transformation needed, because no exact 0s or 1s
+bm.T1 <- betareg(Survival ~ Treatment, data = df3.Patch)
+
+### Variable precision
+bm.T1b <- betareg(Survival ~ Treatment | Treatment, data = df3.Patch)
+
+car::Anova(bm.T1b) 
+
+# ---- STRUCTURE ----
+## Using Patch averages instead of individual Structures, because of distribution
+### Beta regression (because fraction)
+### No transformation needed, because no exact 0s or 1s
+bm.S1 <- betareg(Survival ~ Structure, data = df3.Structure)
+
+### Variable precision
+bm.S1b <- betareg(Survival ~ Structure | Treatment, data = df3.Structure)
+
+car::Anova(bm.S1b) 
+
+```
+
+
+```{r AVG survival: model validation}
+
+# TREATMENT BY DISK
+mod <- bm.TD1b # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.Patch.d$Treatment, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ df3.Patch.d$Survival) # response data vs fitted
+par(op)
+
+# TREATMENT
+mod <- bm.T1b # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.Patch$Treatment, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ df3.Patch$Survival) # response data vs fitted
+par(op)
+
+# STRUCTURE
+mod <- bm.S1b # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.Structure$Structure, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ df3.Structure$Survival) # response data vs fitted
+par(op)
+
+
+```
+
+
+# Post hoc
+```{r post hoc}
+# TREATMENT BY DISK
+## No post hoc because no significant main effect
+
+# TREATMENT
+hsd.Treatment <- emmeans(bm.T1b, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+# STRUCTURE
+hsd.Structure <- emmeans(bm.S1b, specs = pairwise ~ Structure, adjust = "tukey", type = "response")
+
+```
+
+
+# Plot
+```{r plot}
+
+# ---- TREATMENT BY DISK ----
+
+# Plot
+ggplot(df3.Treatment.d, aes(x = Treatment, y = Survival))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival on disk (F)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Fragment survival_Treatment on Disk.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+
+# ---- TREATMENT ----
+# Post hoc letters
+sigletters.T <- multcomp::cld(hsd.Treatment$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.T <- sigletters.T[order(sigletters.T$Treatment),]
+sigletters.T <- sigletters.T %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.Treatment <- df3.Treatment[order(df3.Treatment$Treatment),]
+df3.Treatment.fig <- cbind(df3.Treatment, siglet.loc = sigletters.T$.group)
+
+# Plot
+ggplot(df3.Treatment.fig, aes(x = Treatment, y = Survival))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (F)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.Treatment.fig, aes(x=Treatment, y = Survival + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Fragment survival_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- STRUCTURE X SIZE ----
+
+# Plot
+ggplot(df3.SizexTreatment, aes(fill = Size, x = Structure, y = Survival))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (F)", x = "Structure")+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
+  #geom_text(data = df3.Treatment.fig, aes(x=Treatment, y = Survival + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Fragment survival_Structure x Size.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- STRUCTURE X GENUS ----
+
+# Plot
+ggplot(df3.StructurexGenus, aes(fill = Structure, x = Genus, y = Survival))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (F)", x = "Structure")+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
+  #geom_text(data = df3.Treatment.fig, aes(x=Treatment, y = Survival + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Fragment survival_Structure x Genus.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- STRUCTURE ----
+# Post hoc letters
+sigletters.S <- multcomp::cld(hsd.Structure$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.S <- sigletters.S[order(sigletters.S$Structure),]
+sigletters.S <- sigletters.S %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.Structure.avg <- df3.Structure.avg[order(df3.Structure.avg$Structure),]
+df3.Structure.fig <- cbind(df3.Structure.avg, siglet.loc = sigletters.S$.group)
+
+# Plot
+ggplot(df3.Structure.fig, aes(x = Structure, y = Survival))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Survival (F)", x = "Structure")+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.Structure.fig, aes(x=Structure, y = Survival + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+
+# ---- DEATHS ----
+
+## DEATH x TREATMENT
+## TODO: MAYBE BETTER: DEATH x STRUCTURE (as compound is just a mix)
+ggplot(df3.Dead.byTreatment, aes(fill=Cause.death, y=n, x=Treatment)) + 
+    geom_bar(position="fill", stat="identity")+
+    scale_fill_manual(values = c("#A93226", "#EB984E", "#82E0AA", "#73C6B6", "#85C1E9", "#D2B4DE", "#5D6D7E",
+                                 "#99A3A4", "#D5D8DC", "#FEF9E7", "#17202A"))+
+    labs(y = "Deaths (F)", x = "Treatment", fill = "Cause")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Fragment deaths_Treatment.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+## DEATH x GENUS
+ggplot(df3.Dead.byGenus, aes(fill=Cause.death, y=n, x=Genus)) + 
+    geom_bar(position="fill", stat="identity")+
+    scale_fill_manual(values = c("#A93226", "#EB984E", "#82E0AA", "#73C6B6", "#85C1E9", "#D2B4DE", "#5D6D7E",
+                                 "#99A3A4", "#D5D8DC", "#FEF9E7", "#17202A"))+
+    labs(y = "Deaths (F)", x = "Genus", fill = "Cause")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Fragment deaths_Genus.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+```
+
+
+
+
+

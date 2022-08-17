@@ -1,0 +1,1079 @@
+---
+title: "Benthic cover"
+author: "Ewout Knoester"
+date: "12/08/2022"
+output: html_document
+---
+
+#TODO: check & deal with outlier HC model
+
+```{r setup, include=FALSE}
+
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+options(scipen = 50) # Have all numbers in non-scientific notation
+
+library(car) # Anovas
+library(cowplot) # Plot grid
+library(data.table)
+library(emmeans) # Pairwise comparisons
+library(flextable) # Layout word table
+library(ggthemes) # pretty plots
+library(NCmisc) # Check packages used
+library(nlme) # GLS
+library(betareg) # Beta regression
+library(officer) # Move table into word
+library(panelr) # Convert data from wide to long
+library(plyr) # Join (vlookup)
+library(readxl) # Import excel sheets
+library(tidyverse) # Data manipulation and plotting
+library(writexl) # Export Excel
+
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(sum = sum(x[[col]]),
+      mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+```
+
+# Data selection (preparing dataset for archiving & sharing)
+```{r data selection, warning= FALSE}
+
+# RAW data POINT surveys
+## load first xls sheet
+df0.raw <- read_excel("Raw data/Benthic surveys_2022-08.xlsx", sheet = 3, skip = 1)
+
+## combining next sheets of excel file
+for (i in 4:5) {
+  temp <- read_excel("Raw data/Benthic surveys_2022-08.xlsx", sheet = i, skip = 1)
+  df0.raw <- cbind(df0.raw, temp)
+}
+
+## Remove duplicate columns
+df1.clean <- df0.raw[-c(802, 1603)]
+rm(temp)
+
+## Convert to long dataframe
+df1.clean <- as.data.frame(long_panel(df1.clean, prefix = "_", begin = 1, end = 300, label_location = "end"))
+df1.clean <- df1.clean[order(df1.clean$wave),]
+
+# META data POINT surveys
+## Load Excel
+meta <- read_excel("Raw data/Benthic surveys_2022-08.xlsx", sheet = 2)
+## Change survey names into numbers
+meta$Survey <- sub(".", "", meta$Survey)
+meta$Survey  = str_remove(meta$Survey, "^0+")
+
+# Selection POINT
+## Selection criteria: use metadata to select surveys for current experiment
+meta$Select <- 0
+### Select Sites first
+meta$Select <- ifelse(meta$Location  == "Pilli Pipa" | meta$Location  == "Kikuyu House" | meta$Location  == "Mkwiro CMA",
+                      meta$Select + 1, meta$Select + 0)
+### Omit surveys not done on Structural Complexity transect or area
+meta$Select <- ifelse(meta$Transect  == "NA", meta$Select - 1, meta$Select + 0)
+
+## Apply selection
+df2.selex <- df1.clean[df1.clean$wave %in% c(unlist(na.omit(meta$Survey[meta$Select == 1]))),]
+
+# Cleanup
+df2.selex <- select(df2.selex, -c('id'))
+names(df2.selex)[1] <- "Survey" 
+
+# MERGE DATA AND META POINT
+meta.mini <- select(meta, c('Survey', 'Date', 'Location', 'Transect', 'Observer', 'Survey.type'))
+df2.selex <- merge(df2.selex, meta.mini, by = 'Survey')
+
+# RAW data LINE surveys
+df0.raw.line <- read_excel("Raw data/LINE surveys_2022-08.xlsx", sheet = 3, skip = 1)
+
+# Select 0.5m points only to match point intercept transects
+points <- seq(0, 20, by = 0.5)
+points[1] <- 0.01
+df1.clean.line <- df0.raw.line[df0.raw.line$Points.m %in% points,]
+
+## Convert to long dataframe
+df1.clean.line <- as.data.frame(long_panel(df1.clean.line, prefix = "_", begin = 1, end = 100, label_location = "end"))
+df1.clean.line <- df1.clean.line[order(df1.clean.line$wave),]
+
+# META data LINE surveys
+## Load Excel
+meta.line <- read_excel("Raw data/LINE surveys_2022-08.xlsx", sheet = 2)
+## Change survey names into numbers
+meta.line$Survey <- sub(".", "", meta.line$Survey)
+meta.line$Survey  = str_remove(meta.line$Survey, "^0+")
+
+# Selection LINE
+## Selection criteria: use metadata to select surveys for current experiment
+meta.line$Select <- 0
+### Select Sites first
+meta.line$Select <- ifelse(meta.line$Location  == "Pilli Pipa" | meta.line$Location  == "Kikuyu House" | meta.line$Location  == "Mkwiro CMA", meta.line$Select + 1, meta.line$Select + 0)
+
+## Apply selection
+df2.selex.line <- df1.clean.line[df1.clean.line$wave %in% c(unlist(na.omit(meta.line$Survey[meta.line$Select == 1]))),]
+
+# Cleanup
+df2.selex.line <- select(df2.selex.line, -c('id'))
+names(df2.selex.line)[1] <- "Survey"
+
+# MERGE DATA AND META LINE
+meta.mini.line <- select(meta.line, c('Survey', 'Date', 'Location', 'Transect', 'Observer', 'Survey.type'))
+df2.selex.line <- merge(df2.selex.line, meta.mini.line, by = 'Survey')
+df2.selex.line$Survey <- paste("L", df2.selex.line$Survey, sep = "")
+
+# MERGE POINT AND LINE
+df2.selex <- rbind(df2.selex, df2.selex.line)
+df2.selex$Year <- as.factor(lubridate::year(df2.selex$Date))
+df2.selex$Treatment <- ifelse(grepl("218", df2.selex$Survey), "Reference (+) not used", # Survey on rubble, not on reef
+                       ifelse(grepl("211", df2.selex$Survey), "Reference (+) not used", # Survey on rubble, not on reef
+                       ifelse(grepl("209", df2.selex$Survey), "Reference (+)", # Replace missing survey NT-R-2
+                       ifelse(grepl("BRU", df2.selex$Transect), "BRU", 
+                       ifelse(grepl("CAKE", df2.selex$Transect), "Cake",
+                       ifelse(grepl("CAGE", df2.selex$Transect), "Cage",       
+                       ifelse(grepl("COMP", df2.selex$Transect), "Compound",
+                       ifelse(grepl("\\(F-R", df2.selex$Transect), "Reference (+)", 
+                        ifelse(grepl("\\(F-C-1", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("F-C-1", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(F-C-2", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("F-C-2", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                       ifelse(grepl("\\(NT-R", df2.selex$Transect), "Reference (+)",
+                        ifelse(grepl("\\(NT-C-3", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("NT-C-3", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(NT-C-4", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("NT-C-4", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(NT-C-5", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet?
+                        ifelse(grepl("NT-C-5", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet? 
+                       ifelse(grepl("F-R", df2.selex$Transect), "Reference (-)",
+                       ifelse(grepl("NT-R", df2.selex$Transect), "Reference (-)",
+                       ifelse(grepl("\\(", df2.selex$Transect), "Reference (+) extra plus", 
+                       ifelse(grepl("CMA-", df2.selex$Transect), "Reference (-) extra plus", 
+                       ifelse(grepl("NT-C", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",        
+                       ifelse(grepl("NT-S", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       ifelse(grepl("F-S", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       ifelse(grepl("F-C", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       "Other")))))))))))))))))))))))))))
+
+# EXPORT DATA SELECTION
+write_xlsx(df2.selex, "Structural complexity_Benthic cover_2022-08.xlsx")
+
+```
+
+# Data prep 
+<!--
+Data info:
+  Data of several types of benthic surveys
+  Dead corals were classified as Dead when the genus could still be recognized or as Bare rock when not
+-->
+```{r data prep}
+
+# Load data
+df2.selex <- read_excel("Structural complexity_Benthic cover_2022-08.xlsx")
+
+# Set variables
+df2.selex$Location <- as.factor(df2.selex$Location)
+df2.selex$Transect <- as.factor(df2.selex$Transect)
+df2.selex$Treatment <- as.factor(df2.selex$Treatment)
+
+# GROUPING
+## Group dead corals into bare rock, bare substrate
+df2.selex$Group <- ifelse(grepl("dead", df2.selex$State, ignore.case = TRUE), "Bare.rock", df2.selex$Group)
+df2.selex$Super.group <- ifelse(grepl("dead", df2.selex$State, ignore.case = TRUE), "Bare substrate", df2.selex$Super.group)
+
+## Set groups
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Algae", "Macroalgae", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Bare.rock", "Hard substrate", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Turf.algae", "Hard substrate", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Seagrass", "Bare substrate", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Crustose.coralline.algae", "Hard substrate", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Hard.coral", "Hard coral", df2.selex$Super.group)
+df2.selex$Super.group <- ifelse(df2.selex$Group  == "Soft.coral", "Soft coral", df2.selex$Super.group)
+df2.selex$Super.group[df2.selex$Super.group == "Bare substrate"] <- "Soft substrate"
+
+## Set remaining groups to 'Other'
+df2.selex$Super.group <- ifelse(df2.selex$Super.group  == "Soft substrate" | df2.selex$Super.group  == "Hard substrate" |
+                                df2.selex$Super.group  == "Macroalgae"  | df2.selex$Super.group  == "Soft coral" |
+                                df2.selex$Super.group  == "Hard coral", df2.selex$Super.group, "Other")
+
+# Set order of substrates
+df2.selex$Super.group <- factor(df2.selex$Super.group,  levels=c("Soft substrate", "Hard substrate", "Other", "Macroalgae", "Soft coral", "Hard coral"))
+
+# Set grouping variables as factors
+df2.selex$Genus <- as.factor(df2.selex$Genus)
+df2.selex$Group <- as.factor(df2.selex$Group)
+df2.selex$Super.group <- as.factor(df2.selex$Super.group)
+
+# SUBSETS
+# --- BENTHIC COVER ---
+df3.BC <- select(df2.selex, c('Year', 'Survey', 'Location', 'Treatment', 'Transect', 'Super.group'))
+
+# Select surveys
+## Leave out surveys of 2017 (only Negative reference, and exact locations unknown)
+df3.BC <- subset(df3.BC, Year != "2017")
+
+# Get counts per Survey
+df3.BC <- df3.BC %>%
+          group_by(Year, Survey, Location, Treatment, Transect, Super.group) %>%
+          tally()
+
+# Divide counts by total of points on point intercept transect (= 41) to get cover in percentage
+df3.BC$n <- df3.BC$n/41*100
+colnames(df3.BC)[which(names(df3.BC) == "Super.group")] <- "Substrate"
+colnames(df3.BC)[which(names(df3.BC) == "n")] <- "Cover"
+
+# Fill in zeros for missing Substrate categories
+df3.BC <- df3.BC %>%
+        dplyr::group_by(Year, Location, Treatment, Transect, Survey, Substrate, .drop = FALSE) %>%
+        dplyr::summarise(Cover = sum(Cover))
+df3.BC <- df3.BC[!is.na(df3.BC$Survey),]
+
+df3.BC.avg <- data_summary(df3.BC, varname = "Cover", groupnames = c("Year", "Treatment", "Transect", "Substrate"))
+df3.BC.avg <- select (df3.BC.avg, -c("sum", "sd"))
+
+# ---- TIME ----
+# 2020 - 2022 comparison
+df3.BC.20 <- subset(df3.BC, (Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound" |
+                         Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year == 2020)
+df3.BC.22 <- subset(df3.BC, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022)  | ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020))
+
+# Reference comparison over time
+## Select surveys to be used (repeat sampling present)
+df3.BC.years <- df3.BC
+df3.BC.years$Treatment[df3.BC.years$Treatment == "Reference (+) extra"] <- "Reference (+)"
+df3.BC.years$Treatment[df3.BC.years$Treatment == "Reference (-) extra"] <- "Reference (-)"
+df3.BC.years <- subset(df3.BC.years, Treatment == "Reference (-)" | Treatment == "Reference (+)")
+
+# ---- BENTHIC GROUPS ----
+df3.BC.groups <- subset(df3.BC,((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022) | (Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year > 2019)
+
+# Hard coral comparison
+df3.BC.hc <- subset(df3.BC.groups, (Substrate == "Hard coral"))
+df3.BC.hc.avg <- data_summary(df3.BC.hc, varname = "Cover", groupnames = c("Treatment"))
+df3.BC.hc.avg <- select (df3.BC.hc.avg, -c("sum", "sd"))
+
+# Soft coral comparison
+df3.BC.sc <- subset(df3.BC.groups, (Substrate == "Soft coral"))
+df3.BC.sc.avg <- data_summary(df3.BC.sc, varname = "Cover", groupnames = c("Treatment"))
+df3.BC.sc.avg <- select (df3.BC.sc.avg, -c("sum", "sd"))
+
+# Macroalgae comparison
+df3.BC.ma <- subset(df3.BC.groups, (Substrate == "Macroalgae"))
+df3.BC.ma.avg <- data_summary(df3.BC.ma, varname = "Cover", groupnames = c("Treatment"))
+df3.BC.ma.avg <- select (df3.BC.ma.avg, -c("sum", "sd"))
+
+# Hard substrate comparison
+df3.BC.hs <- subset(df3.BC.groups, (Substrate == "Hard substrate"))
+df3.BC.hs.avg <- data_summary(df3.BC.hs, varname = "Cover", groupnames = c("Treatment"))
+df3.BC.hs.avg <- select (df3.BC.hs.avg, -c("sum", "sd"))
+
+# Soft substrate comparison
+df3.BC.ss <- subset(df3.BC.groups, (Substrate == "Soft substrate"))
+df3.BC.ss.avg <- data_summary(df3.BC.ss, varname = "Cover", groupnames = c("Treatment"))
+df3.BC.ss.avg <- select (df3.BC.ss.avg, -c("sum", "sd"))
+
+# ---- PER GENUS ----
+# Get counts per genus per Survey
+df3.HC.genus <- select(df2.selex, c('Year','Location', 'Treatment', 'Survey', 'Transect', 'Genus', 'Super.group'))
+# Also include additional surveys done in 2020 for the References
+df3.HC.genus <- subset(df3.HC.genus, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022) | (Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year > 2019)
+df3.HC.genus$Treatment <- factor(df3.HC.genus$Treatment) # Omit not used Treatments
+
+# Get total counts (ie number of surveys x 41 points)
+df3.HC.genus.count <- df3.HC.genus %>%
+        dplyr::group_by(Treatment) %>%
+        dplyr::tally()
+colnames(df3.HC.genus.count)[which(names(df3.HC.genus.count) == "n")] <- "n.tot"
+df3.HC.genus.count$Surveys.tot <- df3.HC.genus.count$n.tot/41
+
+df3.HC.genus <- df3.HC.genus[which(df3.HC.genus$Super.group=='Hard coral'), ] # Select hard coral only
+df3.HC.genus$Genus <- factor(df3.HC.genus$Genus) # Omit non-hard coral genera and genera not seen
+
+df3.HC.genus.avg <- df3.HC.genus %>%
+        dplyr::group_by(Treatment, Genus, .drop = FALSE) %>%
+        dplyr::tally()
+
+# Get percentages by dividing counts by total counts
+df3.HC.genus.avg <- merge(df3.HC.genus.avg, df3.HC.genus.count, by = 'Treatment')
+df3.HC.genus.avg$Cover <- df3.HC.genus.avg$n/ df3.HC.genus.avg$n.tot * 100
+
+# Group uncommon coral together as Other
+df3.HC.genus.sum <- data_summary(df3.HC.genus.avg, varname = "n", groupnames = c("Genus"))
+df3.HC.genus.sum.sum <- data_summary(df3.HC.genus.avg, varname = "n.tot", groupnames = c("Genus"))
+df3.HC.genus.sum <- select(df3.HC.genus.sum, c("Genus", "sum"))
+colnames(df3.HC.genus.sum)[which(names(df3.HC.genus.sum) == "sum")] <- "Points.seen"
+df3.HC.genus.sum$Points.total <- df3.HC.genus.sum.sum$sum
+df3.HC.genus.sum$Cover.avg <- df3.HC.genus.sum$Points.seen/ df3.HC.genus.sum$Points.total * 100 
+df3.HC.genus.sum <- df3.HC.genus.sum[order(df3.HC.genus.sum$Cover.avg, decreasing = TRUE),] # Order
+
+# Keep all genera with > 0.1% cover over study sites, group all other together
+df3.HC.genus.avg <- merge(df3.HC.genus.avg, df3.HC.genus.sum, by = 'Genus')
+df3.HC.genus.avg$Genus.o <- ifelse(df3.HC.genus.avg$Points.seen >= 3, as.character(df3.HC.genus.avg$Genus), "Other")
+
+# Sum so that group Other is summed
+df3.HC.genus.avg <- df3.HC.genus.avg %>%
+        dplyr::group_by(Treatment, Genus.o) %>%
+        dplyr::summarise(Cover = sum(Cover))
+
+# Set names of genera
+df3.HC.genus.avg$Genus.o[df3.HC.genus.avg$Genus.o == "Favia"] <- "Dipsastraea"
+
+# Set order of genera
+df3.HC.genus.avg$Genus.o <- factor(df3.HC.genus.avg$Genus.o,  levels=c("Acropora", "Pocillopora", "Porites", "Stylophora",   "Dipsastraea", "Echinopora", "Favites", "Galaxea", "Goniastrea", "Hydnophora", "Porites (massive)", "Other"))
+
+# ---- OTHERS BY GENUS ----
+## SOFT CORAL
+# Get counts per genus per Survey
+df3.SC.genus <- select(df2.selex, c('Year','Location', 'Treatment', 'Survey', 'Transect', 'Genus', 'Family', 'Super.group'))
+# Also include additional surveys done in 2020 for the References
+df3.SC.genus <- subset(df3.SC.genus, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022) | (Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year > 2019)
+df3.SC.genus$Treatment <- factor(df3.SC.genus$Treatment) # Omit not used Treatments
+
+# Get total counts (ie number of surveys x 41 points)
+df3.SC.genus.count <- df3.SC.genus %>%
+        dplyr::group_by() %>%
+        dplyr::tally()
+colnames(df3.SC.genus.count)[which(names(df3.SC.genus.count) == "n")] <- "n.tot"
+df3.SC.genus.count$Surveys.tot <- df3.SC.genus.count$n.tot/41
+
+df3.SC.genus <- df3.SC.genus[which(df3.SC.genus$Super.group=='Soft coral'), ] # Select soft coral only
+df3.SC.genus$Family <- factor(df3.SC.genus$Family) # Omit non-soft coral families
+
+df3.SC.genus.avg <- df3.SC.genus %>%
+        dplyr::group_by(Family, .drop = FALSE) %>% # Patterns pretty similar among treatments, so pooled
+        dplyr::tally()
+
+# Get percentages by dividing counts by total counts
+df3.SC.genus.avg$n.tot <- df3.SC.genus.count$n.tot
+df3.SC.genus.avg$Cover <- df3.SC.genus.avg$n/ df3.SC.genus.avg$n.tot * 100
+
+## MACROALGAE
+# Get counts per genus per Survey
+df3.MA.genus <- select(df2.selex, c('Year','Location', 'Treatment', 'Survey', 'Transect', 'Genus', 'Family', 'Super.group'))
+# Also include additional surveys done in 2020 for the References
+df3.MA.genus <- subset(df3.MA.genus, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022) | (Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year > 2019)
+df3.MA.genus$Treatment <- factor(df3.MA.genus$Treatment) # Omit not used Treatments
+
+# Get total counts (ie number of surveys x 41 points)
+df3.MA.genus.count <- df3.MA.genus %>%
+        dplyr::group_by() %>%
+        dplyr::tally()
+colnames(df3.MA.genus.count)[which(names(df3.MA.genus.count) == "n")] <- "n.tot"
+df3.MA.genus.count$Surveys.tot <- df3.MA.genus.count$n.tot/41
+
+df3.MA.genus <- df3.MA.genus[which(df3.MA.genus$Super.group=='Macroalgae'), ] # Select Macroalgae only
+df3.MA.genus$Genus <- factor(df3.MA.genus$Genus) # Omit non-macroalgae genera
+
+df3.MA.genus.avg <- df3.MA.genus %>%
+        dplyr::group_by(Genus, .drop = FALSE) %>% # Patterns pretty similar among treatments, so pooled
+        dplyr::tally()
+
+# Get percentages by dividing counts by total counts
+df3.MA.genus.avg$n.tot <- df3.MA.genus.count$n.tot
+df3.MA.genus.avg$Cover <- df3.MA.genus.avg$n/ df3.MA.genus.avg$n.tot * 100
+
+## OTHER
+# Get counts per genus per Survey
+df3.O.genus <- select(df2.selex, c('Year','Location', 'Treatment', 'Survey', 'Transect', 'Genus', 'Group', 'Super.group'))
+# Also include additional surveys done in 2020 for the References
+df3.O.genus <- subset(df3.O.genus, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022) | (Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year > 2019)
+df3.O.genus$Treatment <- factor(df3.O.genus$Treatment) # Omit not used Treatments
+
+# Get total counts (ie number of surveys x 41 points)
+df3.O.genus.count <- df3.O.genus %>%
+        dplyr::group_by() %>%
+        dplyr::tally()
+colnames(df3.O.genus.count)[which(names(df3.O.genus.count) == "n")] <- "n.tot"
+df3.O.genus.count$Surveys.tot <- df3.O.genus.count$n.tot/41
+
+df3.O.genus <- df3.O.genus[which(df3.O.genus$Super.group=='Other'), ] # Select Other only
+df3.O.genus$Group<- factor(df3.O.genus$Group) # Omit non-other groups
+
+df3.O.genus.avg <- df3.O.genus %>%
+        dplyr::group_by(Group, .drop = FALSE) %>% # Maybe split per Treatment?
+        dplyr::tally()
+
+# Get percentages by dividing counts by total counts
+df3.O.genus.avg$n.tot <- df3.O.genus.count$n.tot
+df3.O.genus.avg$Cover <- df3.O.genus.avg$n/ df3.O.genus.avg$n.tot * 100
+
+```
+
+# Data exploration
+```{r data exploration}
+
+# Hard coral
+hist(df3.BC.hc$Cover)
+
+# Soft coral
+hist(df3.BC.sc$Cover)
+
+# Macroalgae
+hist(df3.BC.ma$Cover)
+
+# Hard substrate
+hist(df3.BC.hs$Cover)
+
+# Soft substrate
+hist(df3.BC.ss$Cover)
+
+```
+
+# Model
+```{r AVG survival: betareg model selection}
+
+# ---- Hard coral ----
+## Create dataset
+df3.BC.hc.mod <- as.data.frame(df3.BC.hc)
+
+## Transform survival (%) into fraction
+df3.BC.hc.mod <- df3.BC.hc.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.hc.mod<- df3.BC.hc.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Model
+HC.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hc.mod)
+
+### Allowing for variable precision
+HC.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.hc.mod)
+HC.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.hc.mod)
+HC.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hc.mod)
+
+AIC(HC.bm1, HC.bm1b, HC.bm1c, HC.bm1d)
+
+## Model selection fixed part
+HC.bm2T <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hc.mod)
+HC.bm2TL <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hc.mod)
+
+AIC(HC.bm2T, HC.bm2TL) # Location does not add much, better left out
+
+car::Anova(HC.bm2T)
+
+# ---- Soft coral ----
+## Create dataset
+df3.BC.sc.mod <- as.data.frame(df3.BC.sc)
+
+## Transform survival (%) into fraction
+df3.BC.sc.mod <- df3.BC.sc.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.sc.mod<- df3.BC.sc.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Betareg full model
+SC.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hc.mod) # Variable precision did not improve residuals
+
+### Allowing for variable precision (choices based on residual plots)
+SC.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.sc.mod)
+SC.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.sc.mod)
+SC.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.sc.mod)
+
+AIC(SC.bm1, SC.bm1b, SC.bm1c, SC.bm1d) # Location does not add much, better left out
+
+car::Anova(SC.bm1c)
+
+# ---- Macroalgae ----
+## Create dataset
+df3.BC.ma.mod <- as.data.frame(df3.BC.ma)
+
+## Transform survival (%) into fraction
+df3.BC.ma.mod <- df3.BC.ma.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.ma.mod<- df3.BC.ma.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Betareg full model
+MA.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.ma.mod) # Variable precision did not improve residuals
+
+### Allowing for variable precision (choices based on residual plots)
+MA.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.ma.mod)
+MA.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.ma.mod)
+MA.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.ma.mod)
+
+AIC(MA.bm1, MA.bm1b, MA.bm1c, MA.bm1d) # Location does not add much, better left out
+
+car::Anova(MA.bm1c) 
+
+# ---- Hard substrate ----
+## Create dataset
+df3.BC.hs.mod <- as.data.frame(df3.BC.hs)
+
+## Transform survival (%) into fraction
+df3.BC.hs.mod <- df3.BC.hs.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.hs.mod<- df3.BC.hs.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Betareg full model
+HS.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hs.mod) # Variable precision did not improve residuals
+
+### Allowing for variable precision (choices based on residual plots)
+HS.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.hs.mod)
+HS.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.hs.mod)
+HS.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hs.mod)
+
+AIC(HS.bm1, HS.bm1b, HS.bm1c, HS.bm1d) # Location does not add much, better left out
+
+car::Anova(HS.bm1b)
+
+# ---- Soft substrate ----
+## Create dataset
+df3.BC.ss.mod <- as.data.frame(df3.BC.ss)
+
+## Transform survival (%) into fraction
+df3.BC.ss.mod <- df3.BC.ss.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.ss.mod<- df3.BC.ss.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Betareg full model
+SS.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.ss.mod) # Variable precision did not improve residuals
+
+### Allowing for variable precision (choices based on residual plots)
+SS.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.ss.mod)
+SS.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.ss.mod)
+SS.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.ss.mod)
+
+AIC(SS.bm1, SS.bm1b, SS.bm1c, SS.bm1d) # Location does not add much, better left out
+
+car::Anova(SS.bm1c) 
+
+```
+
+# Model validation
+```{r AVG survival: model validation}
+
+# HARD CORAL
+mod <- HC.bm2T # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BC.hc.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(df3.BC.hc.mod$Location, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+
+plot(fitted(mod) ~ df3.BC.hc.mod$Cover) # response data vs fitted
+par(op) # One outlier?
+
+# SOFT CORAL
+mod <- SC.bm1c # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BC.sc.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(df3.BC.sc.mod$Location, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+
+plot(fitted(mod) ~ df3.BC.sc.mod$Cover) # response data vs fitted
+par(op) # One outlier?
+
+# MACROALGAE
+mod <- MA.bm1c # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BC.ma.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(df3.BC.ma.mod$Location, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+
+plot(fitted(mod) ~ df3.BC.ma.mod$Cover) # response data vs fitted
+par(op) # One outlier?
+
+# HARD SUBSTRATE
+mod <- HS.bm1b # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BC.hs.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(df3.BC.hs.mod$Location, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+
+plot(fitted(mod) ~ df3.BC.hs.mod$Cover) # response data vs fitted
+par(op)
+
+# SOFT SUBSTRATE
+mod <- SS.bm1c # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BC.ss.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(df3.BC.ss.mod$Location, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+
+plot(fitted(mod) ~ df3.BC.ss.mod$Cover) # response data vs fitted
+par(op)
+
+
+```
+
+# Post hoc
+```{r post hoc}
+
+# Hard coral
+hsd.hc <- emmeans(HC.bm2T, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+# Soft coral
+hsd.sc <- emmeans(SC.bm1c, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+# Macroalgae
+hsd.ma <- emmeans(MA.bm1c, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+# Hard substrate
+hsd.hs <- emmeans(HS.bm1b, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+# Soft substrate
+hsd.ss <- emmeans(SS.bm1c, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
+
+```
+# Unused plots
+```{r unused, eval=TRUE}
+
+# References over time (2018 - 2022)
+ggplot(df3.BC.years, aes(fill=Substrate, y=Cover, x=Year)) + 
+    facet_grid(.~Treatment)+
+    geom_bar(position="fill", stat="identity")+
+    scale_fill_manual(values = c("#EAEDED", "#909497", "#424949", "#229954", "#F9E79F", "#E67E22"))+
+    labs(y = "Benthic cover (%)", x = "Treatment", fill = "Substrate")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+#ggsave("Benthic cover_Benthic cover years.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- Hard coral ----
+# Post hoc letters
+sigletters.hc <- multcomp::cld(hsd.hc$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.hc <- sigletters.hc[order(sigletters.hc$Treatment),]
+sigletters.hc <- sigletters.hc %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.BC.hc.avg <- df3.BC.hc.avg[order(df3.BC.hc.avg$Treatment),]
+df3.BC.hc.fig <- cbind(df3.BC.hc.avg, siglet.loc = sigletters.hc$.group)
+
+# Plot
+ggplot(df3.BC.hc.fig, aes(x = Treatment, y = Cover))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Cover (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 45), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Cover-(1*se), ymax=Cover+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.BC.hc.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic cover_Hard coral.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- Soft coral ----
+# Post hoc letters
+sigletters.sc <- multcomp::cld(hsd.sc$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.sc <- sigletters.sc[order(sigletters.sc$Treatment),]
+sigletters.sc <- sigletters.sc %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.BC.sc.avg <- df3.BC.sc.avg[order(df3.BC.sc.avg$Treatment),]
+df3.BC.sc.fig <- cbind(df3.BC.sc.avg, siglet.loc = sigletters.sc$.group)
+
+# Plot
+ggplot(df3.BC.sc.fig, aes(x = Treatment, y = Cover))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Cover (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 35), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Cover-(1*se), ymax=Cover+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.BC.sc.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic cover_Soft coral.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- Macroalgae ----
+# Post hoc letters
+sigletters.ma <- multcomp::cld(hsd.ma$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.ma <- sigletters.ma[order(sigletters.ma$Treatment),]
+sigletters.ma <- sigletters.ma %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.BC.ma.avg <- df3.BC.ma.avg[order(df3.BC.ma.avg$Treatment),]
+df3.BC.ma.fig <- cbind(df3.BC.ma.avg, siglet.loc = sigletters.ma$.group)
+
+# Plot
+ggplot(df3.BC.ma.fig, aes(x = Treatment, y = Cover))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Cover (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 17), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Cover-(1*se), ymax=Cover+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.BC.ma.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic cover_Macroalgae.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- Hard substrate ----
+# Post hoc letters
+sigletters.hs <- multcomp::cld(hsd.hs$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.hs <- sigletters.hs[order(sigletters.hs$Treatment),]
+sigletters.hs <- sigletters.hs %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.BC.hs.avg <- df3.BC.hs.avg[order(df3.BC.hs.avg$Treatment),]
+df3.BC.hs.fig <- cbind(df3.BC.hs.avg, siglet.loc = sigletters.hs$.group)
+
+# Plot
+ggplot(df3.BC.hs.fig, aes(x = Treatment, y = Cover))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Cover (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 37), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Cover-(1*se), ymax=Cover+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.BC.hs.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic cover_Hard substrate.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- Soft substrate ----
+# Post hoc letters
+sigletters.ss <- multcomp::cld(hsd.ss$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+# Make order match with summary dataframe
+sigletters.ss <- sigletters.ss[order(sigletters.ss$Treatment),]
+sigletters.ss <- sigletters.ss %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Merge sig.letter dataframe into the summary dataframe
+df3.BC.ss.avg <- df3.BC.ss.avg[order(df3.BC.ss.avg$Treatment),]
+df3.BC.ss.fig <- cbind(df3.BC.ss.avg, siglet.loc = sigletters.ss$.group)
+
+# Plot
+ggplot(df3.BC.ss.fig, aes(x = Treatment, y = Cover))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Cover (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 100), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Cover-(1*se), ymax=Cover+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = df3.BC.ss.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic cover_Soft substrate.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+```
+
+
+# Plots
+```{r plots}
+
+# Treatments in 2022
+ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) + 
+    geom_bar(position="fill", stat="identity")+
+    scale_fill_manual(values = c("#EAEDED", "#909497", "#424949", "#229954", "#F9E79F", "#E67E22"))+
+    labs(y = "Benthic cover (%)", x = "Treatment", fill = "Substrate")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic cover_Benthic cover 2022.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+# Treatments in 2020
+ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) + 
+    geom_bar(position="fill", stat="identity")+
+    scale_fill_manual(values = c("#EAEDED", "#909497", "#424949", "#229954", "#F9E79F", "#E67E22"))+
+    labs(y = "Benthic cover (%)", x = "Treatment", fill = "Substrate")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic cover_Benthic cover 2020.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+# HARD CORAL BY GENUS
+## Legend
+# Create dataframe for legend    
+dt <- data.table(x = 1, y = seq(1, 12, 1), z = factor(1:12))
+dt[ , grp := cut(as.numeric(z), breaks = c(0,8,12),
+                labels = c("Other", "Branching"))]
+dt2 <- dt[ , .(x = 1, y = min(y), yend = max(y), ymid = mean(y)), by = grp]
+dt3 <- data.table(x = 1, y = unlist(dt2[ , .(y, yend)]))
+v <- 0.3 # offset
+
+# Plot legend
+p2 <- ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(data = dt, size = 5)+
+  geom_segment(data = dt2, aes(x = x + v, xend = x + v, yend = yend), colour = c("black"), size = 1)+
+  geom_segment(data = dt3, aes(x = x + v, xend = x + (v - 0.1), yend = y), size = 1, 
+    colour=c("black"))+
+  geom_text(data = dt2, aes(x = x + v + 0.4, y = ymid, label = grp), colour = c( "black"), size = 4, fontface = "bold", vjust = 0.3)+
+  scale_color_manual(values = "", guide = "none") +
+  scale_x_continuous(limits = c(1.2, 2))+
+  theme_void()+
+  theme(plot.margin = unit(c(-0.5, 0.5, 0, -0.5), "cm"))
+
+# Merge CLD (hard coral) with Genus data
+df3.HC.sum <- merge(df3.HC.genus.avg, df3.BC.hc.fig, by = 'Treatment')
+names(df3.HC.sum) <- c('Treatment', 'Genus.o', 'Cover', 'Cover.tot', 'n' ,'se', 'siglet')
+
+# Remove double data
+df3.HC.sum$Cover.tot <- as.numeric(ifelse(df3.HC.sum$Genus.o  != 'Porites', "", df3.HC.sum$Cover.tot))
+df3.HC.sum$se <- as.numeric(ifelse(df3.HC.sum$Genus.o  != 'Porites', "", df3.HC.sum$se))
+df3.HC.sum$n <- as.numeric(ifelse(df3.HC.sum$Genus.o  != 'Porites', "", df3.HC.sum$n))
+df3.HC.sum$siglet <- ifelse(df3.HC.sum$Genus.o  != 'Porites', "", df3.HC.sum$siglet)
+
+# Plot stacked
+HC.SE <- ggplot(df3.HC.sum) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Cover, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Cover.tot, ymax=Cover.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.HC.sum[(df3.HC.sum$Genus.o=="Porites"),],
+           stat = "identity", aes(x = Treatment, y = Cover.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  scale_fill_manual("Genus.o", values = c("#FF930B", "#860000", "#FFFF6F", "#9F0AB1",
+                    "#503287", "#7496BD", "#19b0fc", "#A9E2F3", "#92FE96", "#21b54b", "#D6FEB5", "#D0D0D0"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = "Hard coral cover (%)", x = "Treatment")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 42))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    #strip.text.x = element_text(size = 12, vjust = 2, margin = margin(1.2, 1, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    legend.position = "right",
+    #legend.key.size = unit(1.1, "lines"),
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 4),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#FFFFFF", size = 1),
+    axis.ticks = element_blank()
+    ) 
+
+plot_grid(HC.SE, plot_grid(NULL, p2, NULL, nrow = 3, rel_heights = c(1, 4.5)), rel_widths = c(6, 1))
+ggsave("Coral x Genus by Treatment.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
+
+
+```
+
+
+# Table to compare bitemarks AR with NR
+```{r table}
+# ---- TABLE WORD CODE ----
+# create new word document
+new.word.doc=function(){
+  my.doc=read_docx()
+  return(my.doc)
+}
+
+# add an empty line
+add.empty.line=function(doc){
+  body_add_par(doc, " ")
+  return("empty line added")
+}
+
+# add a data frame as a table
+add.table=function(doc, tbl, col.keys=NULL, col.digits=NULL){
+  # create basic flextable
+  f.table=qflextable(tbl)
+  
+  # set table borders
+  f.table=border_inner_h(f.table, part="header", border=fp_border(color="black", width = 1))
+  #f.table=border_inner_v(f.table, part="all", border=fp_border(color="black", width = 1))
+  
+  # set fonts
+  f.table=flextable::font(f.table,  fontname = "Times", part = "all")
+  # also set the table's header font as bold
+  f.table=bold(f.table, part = "header")
+  
+  # add the table to the document
+  flextable::body_add_flextable(doc, 
+                                value = f.table, 
+                                align = "left" )
+  return("table added")
+}
+
+# ---- NON HARD CORAL GROUPS POST HOC ----
+## Standardize original data frames
+df3.BC.sc.fig$'Functional group' <- "Soft coral"
+df3.BC.ma.fig$'Functional group' <- "Macroalgae"
+df3.BC.hs.fig$'Functional group' <- "Hard substrate"
+df3.BC.ss.fig$'Functional group' <- "Soft substrate"
+## Merge
+df3.BC.all.fig <- rbind(df3.BC.sc.fig, df3.BC.ma.fig, df3.BC.hs.fig, df3.BC.ss.fig)
+df3.BC.all.fig <- select(df3.BC.all.fig, c("Functional group", "Treatment", "Cover", "se", "siglet.loc"))
+## Cleanup
+colnames(df3.BC.all.fig)[which(names(df3.BC.all.fig) == "se")] <- "SE"
+colnames(df3.BC.all.fig)[which(names(df3.BC.all.fig) == "siglet.loc")] <- "CLD"
+df3.BC.all.fig$Cover <- round(df3.BC.all.fig$Cover, digits = 1)
+df3.BC.all.fig$SE <- round(df3.BC.all.fig$SE, digits = 1)
+
+# create a new document object
+doc=new.word.doc()
+add.empty.line(doc)
+add.table(doc, df3.BC.all.fig)
+
+# generate the Word document using the print function
+base::print(doc, target="Benthic cover_Benthic groups post hoc.docx")
+
+# ---- SUBGROUPS BENTHIC COVER ----
+# Create summary table for other benthic groups
+## Standardize original data frames
+df3.SC.genus.avg$'Functional group' <- "Soft coral"
+df3.MA.genus.avg$'Functional group' <- "Macroalgae"
+df3.O.genus.avg$'Functional group'  <- "Other"
+names(df3.SC.genus.avg)[1] <- "Subgroup"
+names(df3.MA.genus.avg)[1] <- "Subgroup"
+names(df3.O.genus.avg)[1]  <- "Subgroup"
+## Order each from large to small
+df3.SC.genus.avg <- df3.SC.genus.avg[rev(order(df3.SC.genus.avg$Cover)),]
+df3.MA.genus.avg <- df3.MA.genus.avg[rev(order(df3.MA.genus.avg$Cover)),]
+df3.O.genus.avg <- df3.O.genus.avg[rev(order(df3.O.genus.avg$Cover)),]
+## Merge
+df3.ALL.genus.avg <- rbind(df3.SC.genus.avg, df3.MA.genus.avg, df3.O.genus.avg)
+df3.ALL.genus.avg <- select(df3.ALL.genus.avg, c("Functional group", "Subgroup", "Cover"))
+df3.ALL.genus.avg$Subgroup <- str_to_title(df3.ALL.genus.avg$Subgroup)
+## Cleanup
+df3.ALL.genus.avg$Cover <- round(df3.ALL.genus.avg$Cover, digits = 1)
+
+# create a new document object
+doc=new.word.doc()
+add.empty.line(doc)
+add.table(doc, df3.ALL.genus.avg)
+
+# generate the Word document using the print function
+base::print(doc, target="Benthic cover_Other benthic groups.docx")
+
+```
+
+
+
+
