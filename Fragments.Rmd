@@ -88,6 +88,11 @@ df1.clean$Cause.death <- as.factor(df1.clean$Cause.death)
 # Select end date only
 df2.surv <- df1.clean[df1.clean$Time == 1, ]
 
+# All structures (for correlation analysis)
+df3.Structure_cor <- data_summary(df2.surv, varname = "Survival", groupnames = c("Treatment" ,"Patch", "Structure", "Number"))
+df3.Structure_cor <- select(df3.Structure_cor, -c("sd", "sum", "se"))
+write_xlsx(df3.Structure_cor, "Correlation data/Structural complexity_Correlations_Fragments.xlsx")
+
 # Disks only per Treatment
 df2.surv.d <- df2.surv[df2.surv$Structure == "DISK", ]
 # Select only Acropora, because Pocillopora and Porites mostly died due to bleaching (not relevant for the Disks)

@@ -1,0 +1,278 @@
+---
+title: "Structural complexity correlations"
+author: "Ewout Knoester"
+date: "17/08/2022"
+output: html_document
+---
+
+# TODO: correlation urchins abundance - recruits
+
+```{r setup, include=FALSE}
+
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+options(scipen = 100) # Have all numbers in non-scientific notation
+
+library(car) # Anovas
+library(cowplot) # Plot grid
+library(data.table)
+library(emmeans) # Pairwise comparisons
+library(flextable) # Layout word table
+library(ggthemes) # pretty plots
+library(NCmisc) # Check packages used
+library(nlme) # GLS
+library(betareg) # Beta regression
+library(officer) # Move table into word
+library(panelr) # Convert data from wide to long
+library(plyr) # Join (vlookup)
+library(readxl) # Import excel sheets
+library(tidyverse) # Data manipulation and plotting
+library(writexl) # Export Excel
+
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(sum = sum(x[[col]]),
+      mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+```
+
+
+# Data prep 
+<!--
+Data info:
+  Data of several types of benthic surveys
+  Dead corals were classified as Dead when the genus could still be recognized or as Bare rock when not
+-->
+```{r data prep}
+
+# Load data
+df2.ARCover <- read_excel("Correlation data/Structural complexity_Correlations_AR cover.xlsx")
+df2.Frags <- read_excel("Correlation data/Structural complexity_Correlations_Fragments.xlsx")
+df2.Frags$Survival <- df2.Frags$Survival * 100
+df2.Recruits <- read_excel("Correlation data/Structural complexity_Correlations_Recruits.xlsx")
+
+# Tidy data
+df2.ARCover <- spread(df2.ARCover, key = Functional.group, value = Cover)
+df2.ARCover$Fouling <- df2.ARCover$Hydroid + df2.ARCover$Macroalgae + df2.ARCover$Other + df2.ARCover$`Soft coral` + df2.ARCover$Sponge + df2.ARCover$Tunicate + df2.ARCover$EAM
+
+
+df2.ARCoverxRecruits.tot <- cbind(df2.ARCover, df2.Recruits)
+df2.ARCoverxRecruits.tot <- select(df2.ARCoverxRecruits.tot, -c(16:22))
+df2.ARCoverxRecruits.tot$Structure <- as.factor(df2.ARCoverxRecruits.tot$Structure)
+df2.ARCoverxRecruits <- select(df2.ARCoverxRecruits.tot, c("Recruits.M2", "Hard coral", "Soft coral", "Hydroid", 
+                              "Sponge", "Tunicate", "Macroalgae", "EAM", "Other", "Hard substrate", "Soft substrate", 
+                              "Fouling"))
+
+df2.ARCoverxFragments <- df2.ARCover[!grepl("Quadrat", df2.ARCover$Structure) & !grepl("PLATE", df2.ARCover$Number), ]
+df2.ARCoverxFragments.tot <- cbind(df2.ARCoverxFragments, df2.Frags)
+df2.ARCoverxFragments.tot <- select(df2.ARCoverxFragments.tot, -c(16:19))
+df2.ARCoverxFragments <- select(df2.ARCoverxFragments.tot, c("Survival", "Hard coral", "Soft coral", "Hydroid", 
+                              "Sponge", "Tunicate", "Macroalgae", "EAM", "Other", "Hard substrate", "Soft substrate",
+                              "Fouling"))
+
+```
+
+# Correlations
+```{r correlations}
+
+# ARCOVER x RECRUITS
+cors.ArcoverxRecruits <- as.data.frame(correlation::correlation(df2.ARCoverxRecruits, p_adjust = "none"))
+cors.ArcoverxRecruits <- cors.ArcoverxRecruits[grepl("Recruits.M2", cors.ArcoverxRecruits$Parameter1), ]
+cors.ArcoverxRecruits$ID <- paste(cors.ArcoverxRecruits$Parameter1, cors.ArcoverxRecruits$Parameter2, sep = "X")
+cors.ArcoverxRecruits <- cors.ArcoverxRecruits[c(3, 9, 12)]
+cors.ArcoverxRecruits$r <- round(cors.ArcoverxRecruits$r, 2)
+cors.ArcoverxRecruits$p <- round(cors.ArcoverxRecruits$p, 2)
+cors.ArcoverxRecruits$star <- ifelse(cors.ArcoverxRecruits$p <= 0.001, "***",
+  ifelse(cors.ArcoverxRecruits$p <= 0.01, "**", 
+    ifelse(cors.ArcoverxRecruits$p <= 0.05, "*", "")))
+cors.ArcoverxRecruits$sum <- paste("R = ", cors.ArcoverxRecruits$r, cors.ArcoverxRecruits$star, sep = "")
+
+# ARCOVER x FRAGMENT SURVIVAL
+cors.ArcoverxFragments <- as.data.frame(correlation::correlation(df2.ARCoverxFragments, p_adjust = "none"))
+cors.ArcoverxFragments <- cors.ArcoverxFragments[grepl("Survival", cors.ArcoverxFragments$Parameter1), ]
+cors.ArcoverxFragments$ID <- paste(cors.ArcoverxFragments$Parameter1, cors.ArcoverxFragments$Parameter2, sep = "X")
+cors.ArcoverxFragments <- cors.ArcoverxFragments[c(3, 9, 12)]
+cors.ArcoverxFragments$r <- round(cors.ArcoverxFragments$r, 2)
+cors.ArcoverxFragments$p <- round(cors.ArcoverxFragments$p, 2)
+cors.ArcoverxFragments$star <- ifelse(cors.ArcoverxFragments$p <= 0.001, "***",
+  ifelse(cors.ArcoverxFragments$p <= 0.01, "**", 
+    ifelse(cors.ArcoverxFragments$p <= 0.05, "*", "")))
+cors.ArcoverxFragments$sum <- paste("R = ", cors.ArcoverxFragments$r, cors.ArcoverxFragments$star, sep = "")
+
+```
+
+# Plot
+```{r plot}
+
+# Exclude Quadrats for the following graphs:
+df2.ARCoverxRecruits.tot.NQ <- df2.ARCoverxRecruits.tot[!grepl("Quadrat", df2.ARCoverxRecruits.tot$Structure), ]
+
+# EAM x RECRUITS
+ggplot(df2.ARCoverxRecruits.tot.NQ, aes(x = EAM, y = Recruits.M2, color = Structure)) + 
+  scale_x_continuous("EAM Cover", label = waiver (), limits = c (0, 82))+
+  scale_y_continuous(expression(paste("Recruits (", m^-2,")")), limits = c(0, 61), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+#ggsave("Correlations_EAM x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# HARD SUBSTRATE X RECRUITS
+ggplot(df2.ARCoverxRecruits.tot.NQ, aes(x = `Hard substrate`, y = Recruits.M2, color = Structure)) + 
+  scale_x_continuous("Hard substrate Cover", label = waiver (), limits = c (0, 82))+
+  scale_y_continuous(expression(paste("Recruits (", m^-2,")")), limits = c(0, 61), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+ggsave("Correlations_Hard substrate x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# HARD CORAL X RECRUITS
+ggplot(df2.ARCoverxRecruits.tot.NQ, aes(x = `Hard coral`, y = Recruits.M2, color = Structure)) + 
+  scale_x_continuous("Hard coral Cover", label = waiver (), limits = c (0, 82))+
+  scale_y_continuous(expression(paste("Recruits (", m^-2,")")), limits = c(0, 61), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+#ggsave("Correlations_Hard coral x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# ALL FOULING X RECRUITS
+ggplot(df2.ARCoverxRecruits.tot.NQ, aes(x = Fouling, y = Recruits.M2, color = Structure)) + 
+  scale_x_continuous("Fouling Cover", label = waiver (), limits = c (0, 82))+
+  scale_y_continuous(expression(paste("Recruits (", m^-2,")")), limits = c(0, 61), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+#ggsave("Correlations_Fouling x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# HARD CORAL SURVIVAL X HARD CORAL COVER
+ggplot(df2.ARCoverxFragments.tot, aes(x = Survival, y = `Hard coral`, color = Structure)) + 
+  scale_x_continuous("Fragment survival", label = waiver (), limits = c (0, 100))+
+  scale_y_continuous("Hard coral cover", limits = c(0, 100), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+ggsave("Correlations_Fragment survival x Coral cover.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# HARD CORAL SURVIVAL X FOULING
+ggplot(df2.ARCoverxFragments.tot, aes(x = Survival, y = Fouling, color = Structure)) + 
+  scale_x_continuous("Fragment survival", label = waiver (), limits = c (0, 100))+
+  scale_y_continuous("Fouling cover", limits = c(0, 100), label = waiver ())+
+  geom_point(size = 2) +
+  scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+ggsave("Correlations_Fragment survival x Fouling cover.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+```
+
+
+

@@ -1,0 +1,86 @@
+Label,Code,Functional group
+Acanthastrea,Aca,Hard coral
+Acropora,Acr,Hard coral
+Alveopora,Alveopora,Hard coral
+Astreopora,Astreo,Hard coral
+Blastomussa,Bla,Hard coral
+Caulastrea,Caula,Hard coral
+Coscinaraea,Cos,Hard coral
+Cyphastrea,Cyp,Hard coral
+Diploastrea,Diplo,Hard coral
+Dipsastraea,Dipsa,Hard coral
+Echinophyllia,Echphy,Hard coral
+Echinopora,Echpo,Hard coral
+Favites,Favit,Hard coral
+Fungiidae,Fungii,Hard coral
+Galaxea,Gal,Hard coral
+Gardineroseris,Gardineros,Hard coral
+Goniastrea,Gonia,Hard coral
+Goniopora,Gonio,Hard coral
+Hard coral,HC,Hard coral
+Hydnophora,Hydno,Hard coral
+Isopora,Iso,Hard coral
+Leptastrea,Lepta,Hard coral
+Leptoria,Leptor,Hard coral
+Leptoseris,Leptos,Hard coral
+Lobophyllia,Lobo,Hard coral
+Merulina,Merulina,Hard coral
+Montastraea,Monta,Hard coral
+Montipora,Monti,Hard coral
+Mycedium,Myc,Hard coral
+Oulophyllia,Oul,Hard coral
+Oxypora,Oxyp,Hard coral
+Pachyseris,Pachy,Hard coral
+Pavona,Pav,Hard coral
+Physogyra,Phy,Hard coral
+Platygyra,Platy,Hard coral
+Plerogyra,Plero,Hard coral
+Pocillopora,Poc,Hard coral
+Porites (branching),PorB,Hard coral
+Porites (massive),PorM,Hard coral
+Psammocora,Psa,Hard coral
+Seriatopora,Ser,Hard coral
+Stylophora,Styl,Hard coral
+Symphyllia,Sym,Hard coral
+Turbinaria (coral),Turb_HC,Hard coral
+Aglaophenia spp.,Agl,Hydroid
+Anemone,Anemone,Other
+Bivalve,Bivalve,Other
+Bryozoan,Bryo,Other
+Corallimorpharia,Coralli,Other
+Didemnidae,Didae,Tunicate
+Hydroid,Hydroid,Hydroid
+Millepora,Mil,Hard coral
+Soft Coral,SC,Soft coral
+Sponge,SP,Sponge
+Tubipora musica,Tubmus,Soft coral
+Tunicate,Tunicate,Tunicate
+Echinoderms: sea urchin,Urchins,Not applicable
+XENIIDAE,Xendae,Soft coral
+Zoanthid,Zoanthid,Other
+Biofilm,biofilm,Hard substrate
+Rhytisma,Rhy,Soft coral
+Sand,Sand,Soft substrate
+Dead coral,dead,Hard substrate
+Hard Substrate,HS_AR,Hard substrate
+Rock,Rock,Hard substrate
+Cyanobacteria,Cyano,Other
+Framer,Frame,Not applicable
+Rubble,Rubble,Soft substrate
+Unknown,Unknown,Other
+Ochrophyta,BA,Macroalgae
+Caulerpa,Cau,Macroalgae
+CCA (crustose coralline algae),CCA,EAM
+Dictyota,Dic,Macroalgae
+Algae (filamentous),Fila,Macroalgae
+Chlorophyta,GA,Macroalgae
+Halimeda,Hal,Macroalgae
+Lobophora variegata,Lobvar,Macroalgae
+Macroalgae,MA,Macroalgae
+Padina,Pad,Macroalgae
+Rhodophyta,RA,Macroalgae
+Sargassum,Sar,Macroalgae
+Turf algae,TA,EAM
+Turbinaria (algae),Turb_MA,Macroalgae
+Valonia spp.,Val,Macroalgae
+Seagrass,SG,Soft substrate

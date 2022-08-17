@@ -170,6 +170,8 @@ df2.Structure$SA.projected <- ifelse(grepl("BRU", df2.Structure$Structure), 1,
                               ifelse(grepl("Disk", df2.Structure$Structure), 0.25,
                               ifelse(grepl("Quadrat", df2.Structure$Structure), 1, NA)))))
 df2.Structure$Recruits.M2 <- df2.Structure$Recruits.N/ df2.Structure$SA.projected
+write_xlsx(df2.Structure, "Correlation data/Structural complexity_Correlations_Recruits.xlsx")
+
 df2.Structure.nodisk <- df2.Structure[!grepl("Disk", df2.Structure$Structure), ]
 
 # Totaling for all structures, divided by patch area (16 m2)
