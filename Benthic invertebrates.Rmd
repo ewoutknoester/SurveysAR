@@ -1,0 +1,766 @@
+---
+title: "Benthic invertebrates"
+author: "Ewout Knoester"
+date: "22/08/2022"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+options(scipen = 50) # Have all numbers in non-scientific notation
+
+library(car) # ANOVA results
+library(data.table) # Data table
+library(emmeans) # Pairwise comparisons
+library(ggthemes) # pretty plots
+library(NCmisc) # Check packages used
+library(nlme) # GLS
+library(panelr) # wide to long
+library(plyr) # Join (vlookup)
+library(readxl) # Import excel sheets
+library(tidyverse) # Data manipulation and plotting
+library(writexl) # Export Excel
+
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(sum = sum(x[[col]]),
+      mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+```
+
+# Data selection (preparing dataset for archiving & sharing)
+```{r data selection}
+
+# --- RAW data surveys (POINT) ---
+## load first xls sheet
+df0.raw <- read_excel("Raw data/Benthic surveys_2022-08.xlsx", sheet = 6)
+
+## Convert to long dataframe
+df1.clean <- as.data.frame(panelr::long_panel(df0.raw, prefix = "_P", begin = 1, end = 300, label_location = "end"))
+
+## META data
+### Load Excel
+meta <- read_excel("Raw data/Benthic surveys_2022-08.xlsx", sheet = 2)
+### Change survey names into numbers
+meta$Survey <- sub(".", "", meta$Survey)
+meta$Survey  = str_remove(meta$Survey, "^0+")
+
+## SELECTION
+### Selection criteria: use metadata to select surveys for current experiment
+meta$Select <- 0
+#### Select Sites first
+meta$Select <- ifelse(meta$Location  == "Pilli Pipa" | meta$Location  == "Kikuyu House" | meta$Location  == "Mkwiro CMA",
+                      meta$Select + 1, meta$Select + 0)
+### Omit surveys not done on Structural Complexity transect or area
+meta$Select <- ifelse(meta$Transect  == "NA", meta$Select - 1, meta$Select + 0)
+
+## Apply selection
+df2.selex <- df1.clean[df1.clean$wave %in% c(unlist(na.omit(meta$Survey[meta$Select == 1]))),]
+
+## Cleanup
+df2.selex <- select(df2.selex, -c('id'))
+colnames(df2.selex)[which(names(df2.selex) == "Survey")] <- "Abundance"
+names(df2.selex)[1] <- "Survey" 
+
+## MERGE
+meta.mini <- select(meta, c('Survey', 'Date', 'Location', 'Transect', 'Observer', 'Survey.type'))
+df2.selex <- merge(df2.selex, meta.mini, by = 'Survey')
+
+# --- RAW data surveys (LINE) --
+df0.raw.line <- read_excel("Raw data/LINE surveys_2022-08.xlsx", sheet = 4, skip = 1)
+
+## Convert to long dataframe
+df1.clean.line <- as.data.frame(panelr::long_panel(df0.raw.line, prefix = "_L", begin = 1, end = 100, label_location = "end"))
+
+## META data
+### Load Excel
+meta.line <- read_excel("Raw data/LINE surveys_2022-08.xlsx", sheet = 2)
+### Change survey names into numbers
+meta.line$Survey <- sub(".", "", meta.line$Survey)
+meta.line$Survey  = str_remove(meta.line$Survey, "^0+")
+
+## SELECTION
+### Selection criteria: use metadata to select surveys for current experiment
+meta.line$Select <- 0
+### Select Sites first
+meta.line$Select <- ifelse(meta.line$Location  == "Pilli Pipa" | meta.line$Location  == "Kikuyu House" | meta.line$Location  == "Mkwiro CMA", meta.line$Select + 1, meta.line$Select + 0)
+
+## Apply selection
+df2.selex.line <- df1.clean.line[df1.clean.line$wave %in% c(unlist(na.omit(meta.line$Survey[meta.line$Select == 1]))),]
+
+## Cleanup
+df2.selex.line <- select(df2.selex.line, -c('id'))
+colnames(df2.selex.line)[which(names(df2.selex.line) == "Survey")] <- "Abundance"
+names(df2.selex.line)[1] <- "Survey" 
+
+## MERGE
+meta.mini.line <- select(meta.line, c('Survey', 'Date', 'Location', 'Transect', 'Observer', 'Survey.type'))
+df2.selex.line <- merge(df2.selex.line, meta.mini.line, by = 'Survey')
+df2.selex.line$Survey <- paste("L", df2.selex.line$Survey, sep = "")
+
+df2.selex <- rbind(df2.selex, df2.selex.line)
+
+# Cleanup
+df2.selex <- select(df2.selex, -c('Comments'))
+df2.selex$Abundance[is.na(df2.selex$Abundance)] <- 0 # Set NAs to zeros
+df2.selex$Year <- as.factor(lubridate::year(df2.selex$Date))
+
+# Set species names
+df2.selex$Species[df2.selex$Species ==  "Coralliophila sp"] <- "Coralliophila"
+df2.selex$Species[df2.selex$Species ==  "Drupella sp"] <- "Drupella"
+df2.selex$Species[df2.selex$Species ==  "Acanthaster planci"] <- "Acanthaster"
+df2.selex$Species[df2.selex$Species ==  "Culcita schmideliana"] <- "Culcita"
+df2.selex$Species[df2.selex$Species ==  "Culcita sp"] <- "Culcita"
+df2.selex$Species[df2.selex$Species ==  "Octopus sp"] <- "Octopus"
+df2.selex$Species[grepl("Linckia", df2.selex$Species)] <- "Linckia"
+df2.selex$Species[grepl("Nardoa", df2.selex$Species)] <- "Nardoa"
+df2.selex$Species[grepl("Pentaceraster", df2.selex$Species)] <- "Pentaceraster"
+
+# Sum so the new groups are summed
+df2.selex <- df2.selex %>%
+        dplyr::group_by(Survey, Year, Location, Transect, Survey.type, Group, Species) %>%
+        dplyr::summarise(Abundance = sum(Abundance))
+
+# Get densities based on survey type and invertebrate group
+df2.selex$Area <- ifelse(df2.selex$Survey.type == "Circle.10" & df2.selex$Group == "Corallivorous.snails", 10,
+                  ifelse(df2.selex$Survey.type == "Circle.10" & df2.selex$Group == "Urchins", 20,
+                  ifelse(df2.selex$Survey.type == "Circle.10", 50,
+                  ifelse(df2.selex$Group == "Corallivorous.snails", 20,
+                  ifelse(df2.selex$Group == "Urchins", 40, 100)))))
+
+df2.selex$Density.m2 <- df2.selex$Abundance / df2.selex$Area
+
+# Organize data frame
+df2.selex$Treatment <- ifelse(grepl("218", df2.selex$Survey), "Reference (+) not used", # Survey on rubble, not on reef
+                       ifelse(grepl("211", df2.selex$Survey), "Reference (+) not used", # Survey on rubble, not on reef
+                       ifelse(grepl("209", df2.selex$Survey), "Reference (+)", # Replace missing survey NT-R-2
+                       ifelse(grepl("BRU", df2.selex$Transect), "BRU", 
+                       ifelse(grepl("CAKE", df2.selex$Transect), "Cake",
+                       ifelse(grepl("CAGE", df2.selex$Transect), "Cage",       
+                       ifelse(grepl("COMP", df2.selex$Transect), "Compound",
+                       ifelse(grepl("\\(F-R", df2.selex$Transect), "Reference (+)", 
+                        ifelse(grepl("\\(F-C-1", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("F-C-1", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(F-C-2", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("F-C-2", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                       ifelse(grepl("\\(NT-R", df2.selex$Transect), "Reference (+)",
+                        ifelse(grepl("\\(NT-C-3", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("NT-C-3", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(NT-C-4", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet
+                        ifelse(grepl("NT-C-4", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet
+                        ifelse(grepl("\\(NT-C-5", df2.selex$Transect), "Reference (+) extra", # No ARs placed yet?
+                        ifelse(grepl("NT-C-5", df2.selex$Transect), "Reference (-) extra", # No ARs placed yet? 
+                       ifelse(grepl("F-R", df2.selex$Transect), "Reference (-)",
+                       ifelse(grepl("NT-R", df2.selex$Transect), "Reference (-)",
+                       ifelse(grepl("\\(", df2.selex$Transect), "Reference (+) extra plus", 
+                       ifelse(grepl("CMA-", df2.selex$Transect), "Reference (-) extra plus", 
+                       ifelse(grepl("NT-C", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",        
+                       ifelse(grepl("NT-S", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       ifelse(grepl("F-S", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       ifelse(grepl("F-C", df2.selex$Transect) & df2.selex$Year == 2018, "Reference (-) before",
+                       "Other")))))))))))))))))))))))))))
+
+write_xlsx(df2.selex, "Structural complexity_Benthic invertebrates_2022-08.xlsx")
+
+```
+
+# Data prep 
+<!--
+Data info:
+  Data of several types of benthic surveys
+  Dead corals were classified as Dead when the genus could still be recognized or as Bare rock when not
+-->
+```{r data prep}
+
+# Load data
+df2.selex <- read_excel("Structural complexity_Benthic invertebrates_2022-08.xlsx")
+
+# Set variables
+df2.selex$Location <- as.factor(df2.selex$Location)
+df2.selex$Transect <- as.factor(df2.selex$Transect)
+df2.selex$Treatment <- as.factor(df2.selex$Treatment)
+
+# Set groups
+df2.selex <- subset(df2.selex, Group != "Crabs") # Exclude crabs, as not focus of this study
+df2.selex <- subset(df2.selex, Group != "Lobsters") # Exclude lobsters, as only 5 were seen in total
+df2.selex <- subset(df2.selex, Species != "Tridacna sp") # Exclude Tridacna: not mobile invertebrate
+df2.selex$Group[df2.selex$Group == "Shells"] <- "Gastropods" # Rename
+df2.selex$Group <- as.factor(df2.selex$Group)
+df2.selex$Species <- as.factor(df2.selex$Species)
+
+# ---- TIME ----
+# 2020 - 2022 comparison
+## Because low number of invertebrates and no discernable difference between various AR types, all ARs pooled together?
+## Corallivorous snails & Urchins
+df3.BI.20 <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound" |
+                      Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year == 2020 & 
+                      (Group == "Corallivorous.snails" | Group == "Urchins")))
+df3.BI.20.avg <- data_summary(df3.BI.20, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.20.avg <- data_summary(df3.BI.20.avg, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.20.avg <- select (df3.BI.20.avg, -c(3, 5))
+colnames(df3.BI.20.avg)[which(names(df3.BI.20.avg) == "sum")] <- "Density.m2"
+
+df3.BI.22 <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Corallivorous.snails" | Group == "Urchins"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Corallivorous.snails" | Group == "Urchins")))
+df3.BI.22.avg <- data_summary(df3.BI.22, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.22.avg <- data_summary(df3.BI.22.avg, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.22.avg <- select (df3.BI.22.avg, -c(3, 5))
+colnames(df3.BI.22.avg)[which(names(df3.BI.22.avg) == "sum")] <- "Density.m2"
+
+# Other invertebrates
+df2.selex$Density.ha <- df2.selex$Density.m2 * 10000
+df3.BI.20.o <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound" |
+                      Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year == 2020 & 
+                      (Group != "Corallivorous.snails" & Group != "Urchins")))
+df3.BI.20.avg.o <- data_summary(df3.BI.20.o, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.20.avg.o <- data_summary(df3.BI.20.avg.o, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.20.avg.o <- select (df3.BI.20.avg.o, -c(3, 5))
+colnames(df3.BI.20.avg.o)[which(names(df3.BI.20.avg.o) == "sum")] <- "Density.ha"
+
+df3.BI.22.o <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group != "Corallivorous.snails" & Group != "Urchins"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group != "Corallivorous.snails" & Group != "Urchins")))
+df3.BI.22.avg.o <- data_summary(df3.BI.22.o, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.22.avg.o <- data_summary(df3.BI.22.avg.o, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.22.avg.o <- select (df3.BI.22.avg.o, -c(3, 5))
+colnames(df3.BI.22.avg.o)[which(names(df3.BI.22.avg.o) == "sum")] <- "Density.ha"
+
+# Reference comparison over time
+## Select surveys to be used (repeat sampling present)
+df3.BI.years <- df2.selex
+df3.BI.years$Treatment[df3.BI.years$Treatment == "Reference (+) extra"] <- "Reference (+)"
+df3.BI.years$Treatment[df3.BI.years$Treatment == "Reference (-) extra"] <- "Reference (-)"
+
+df3.BI.years.Snur <- subset(df3.BI.years, (Treatment == "Reference (-)" | Treatment == "Reference (+)") & (Group == "Corallivorous.snails" | Group == "Urchins"))
+df3.BI.years.Snur <- data_summary(df3.BI.years.Snur, varname = "Density.m2", groupnames = c("Year","Group", "Treatment", "Survey"))
+df3.BI.years.Snur <- data_summary(df3.BI.years.Snur, varname = "sum", groupnames = c("Year","Group", "Treatment"))
+df3.BI.years.Snur <- select (df3.BI.years.Snur, -c(4, 6))
+colnames(df3.BI.years.Snur)[which(names(df3.BI.years.Snur) == "sum")] <- "Density.m2"
+
+df3.BI.years.o <- subset(df3.BI.years, (Treatment == "Reference (-)" | Treatment == "Reference (+)") & (Group != "Corallivorous.snails" & Group != "Urchins"))
+df3.BI.years.o <- data_summary(df3.BI.years.o, varname = "Density.ha", groupnames = c("Year","Group", "Treatment", "Survey"))
+df3.BI.years.o <- data_summary(df3.BI.years.o, varname = "sum", groupnames = c("Year","Group", "Treatment"))
+df3.BI.years.o <- select (df3.BI.years.o, -c(4, 6))
+colnames(df3.BI.years.o)[which(names(df3.BI.years.o) == "sum")] <- "Density.ha"
+
+# ---- PER GROUP AND SPECIES ----
+
+## CORALLIVOROUS SNAILS
+df3.BI.snail <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Corallivorous.snails"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Corallivorous.snails")))
+
+### Total
+df3.BI.snail.tot <- data_summary(df3.BI.snail, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.snail.tot <- data_summary(df3.BI.snail.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.snail.tot <- select (df3.BI.snail.tot, -c(3, 5))
+colnames(df3.BI.snail.tot)[which(names(df3.BI.snail.tot) == "sum")] <- "Density.m2.tot"
+
+### Per species
+df3.BI.snail.spec <- data_summary(df3.BI.snail, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey", "Species"))
+df3.BI.snail.spec <- data_summary(df3.BI.snail.spec, varname = "sum", groupnames = c("Group", "Treatment", "Species"))
+df3.BI.snail.spec <- select (df3.BI.snail.spec, -c(4, 6, 7, 8))
+colnames(df3.BI.snail.spec)[which(names(df3.BI.snail.spec) == "sum")] <- "Density.m2"
+
+### Merge
+df3.BI.snail.tot$Namer <- paste(df3.BI.snail.tot$Treatment, df3.BI.snail.tot$Group, sep = ".")
+df3.BI.snail.tot <- select (df3.BI.snail.tot, -c("Group", "Treatment"))
+df3.BI.snail.spec$Namer <- paste(df3.BI.snail.spec$Treatment, df3.BI.snail.spec$Group, sep = ".")
+df3.BI.snail.spec <- left_join(df3.BI.snail.spec, df3.BI.snail.tot, by = "Namer")
+
+## URCHINS
+df3.BI.urchin <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Urchins"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Urchins")))
+
+### Summarize to level of genus (not species)
+df3.BI.urchin$Genus <- word(df3.BI.urchin$Species, 1)
+df3.BI.urchin <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Treatment","Group", "Genus", "Survey"))
+df3.BI.urchin <- select (df3.BI.urchin, -c(6:9))
+colnames(df3.BI.urchin)[which(names(df3.BI.urchin) == "sum")] <- "Density.m2"
+
+### Total
+df3.BI.urchin.tot <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.urchin.tot <- data_summary(df3.BI.urchin.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.urchin.tot <- select (df3.BI.urchin.tot, -c(3, 5))
+colnames(df3.BI.urchin.tot)[which(names(df3.BI.urchin.tot) == "sum")] <- "Density.m2.tot"
+
+### Species total (to set category Other)
+df3.BI.urchin.tot.spec <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Genus", "Survey"))
+df3.BI.urchin.tot.spec <- data_summary(df3.BI.urchin.tot.spec, varname = "sum", groupnames = c("Genus"))
+df3.BI.urchin.tot.spec <- select (df3.BI.urchin.tot.spec, -c(2, 4))
+colnames(df3.BI.urchin.tot.spec)[which(names(df3.BI.urchin.tot.spec) == "sum")] <- "Density.m2.tot"
+df3.BI.urchin.tot.spec$Density.pct <- df3.BI.urchin.tot.spec$Density.m2.tot / sum(df3.BI.urchin.tot.spec$Density.m2.tot) * 100 
+df3.BI.urchin.tot.spec$Genus.o <- ifelse(df3.BI.urchin.tot.spec$Density.pct > 1, df3.BI.urchin.tot.spec$Genus, "Other")
+df3.BI.urchin.tot.spec <- select (df3.BI.urchin.tot.spec, -c(2:4))
+df3.BI.urchin <- left_join(df3.BI.urchin, df3.BI.urchin.tot.spec, by = "Genus")
+
+### Per species
+df3.BI.urchins.spec <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
+df3.BI.urchins.spec <- data_summary(df3.BI.urchins.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
+df3.BI.urchins.spec <- select (df3.BI.urchins.spec, -c(4, 6, 7, 8))
+colnames(df3.BI.urchins.spec)[which(names(df3.BI.urchins.spec) == "sum")] <- "Density.m2"
+
+### Merge
+df3.BI.urchin.tot <- select (df3.BI.urchin.tot, -c("Group"))
+df3.BI.urchins.spec <- left_join(df3.BI.urchins.spec, df3.BI.urchin.tot, by = "Treatment")
+
+## GASTROPODS
+df3.BI.gastro <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Gastropods"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Gastropods")))
+
+### Summarize to level of genus (not species)
+df3.BI.gastro$Genus <- word(df3.BI.gastro$Species, 1)
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Cypraea"] <- "Cypraeidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "CYPRAEIDAE"] <- "Cypraeidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "CONIDAE"] <- "Conidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Chicoreus"] <- "Muricidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Vasum"] <- "Turbinellidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Lambis"] <- "Strombidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Strombus"] <- "Strombidae"
+df3.BI.gastro$Genus[df3.BI.gastro$Genus == "Tutufa"] <- "Bursidae"
+df3.BI.gastro <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Treatment","Group", "Genus", "Survey"))
+df3.BI.gastro <- select (df3.BI.gastro, -c(6:9))
+colnames(df3.BI.gastro)[which(names(df3.BI.gastro) == "sum")] <- "Density.ha"
+
+### Total
+df3.BI.gastro.tot <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.gastro.tot <- data_summary(df3.BI.gastro.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.gastro.tot <- select (df3.BI.gastro.tot, -c(3, 5))
+colnames(df3.BI.gastro.tot)[which(names(df3.BI.gastro.tot) == "sum")] <- "Density.ha.tot"
+
+### Species total (to set category Other)
+df3.BI.gastro.tot.spec <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Genus", "Survey"))
+df3.BI.gastro.tot.spec <- data_summary(df3.BI.gastro.tot.spec, varname = "sum", groupnames = c("Genus"))
+df3.BI.gastro.tot.spec <- select (df3.BI.gastro.tot.spec, -c(2, 4))
+colnames(df3.BI.gastro.tot.spec)[which(names(df3.BI.gastro.tot.spec) == "sum")] <- "Density.ha.tot"
+df3.BI.gastro.tot.spec$Density.pct <- df3.BI.gastro.tot.spec$Density.ha.tot / sum(df3.BI.gastro.tot.spec$Density.ha.tot) * 100 
+df3.BI.gastro.tot.spec$Genus.o <- ifelse(df3.BI.gastro.tot.spec$Density.pct > 1, df3.BI.gastro.tot.spec$Genus, "Other")
+df3.BI.gastro.tot.spec <- select (df3.BI.gastro.tot.spec, -c(2:4))
+df3.BI.gastro <- left_join(df3.BI.gastro, df3.BI.gastro.tot.spec, by = "Genus")
+
+### Per species
+df3.BI.gastro.spec <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
+df3.BI.gastro.spec <- data_summary(df3.BI.gastro.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
+df3.BI.gastro.spec <- select (df3.BI.gastro.spec, -c(4, 6, 7, 8))
+colnames(df3.BI.gastro.spec)[which(names(df3.BI.gastro.spec) == "sum")] <- "Density.ha"
+
+### Merge
+df3.BI.gastro.tot <- select (df3.BI.gastro.tot, -c("Group"))
+df3.BI.gastro.spec <- left_join(df3.BI.gastro.spec, df3.BI.gastro.tot, by = "Treatment")
+
+## SEA CUCUMBERS
+df3.BI.cucum <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Seacucumbers"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Seacucumbers")))
+
+### Summarize to level of genus (not species)
+df3.BI.cucum$Genus <- word(df3.BI.cucum$Species, 1)
+df3.BI.cucum <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Treatment","Group", "Genus", "Survey"))
+df3.BI.cucum <- select (df3.BI.cucum, -c(6:9))
+colnames(df3.BI.cucum)[which(names(df3.BI.cucum) == "sum")] <- "Density.ha"
+
+### Total
+df3.BI.cucum.tot <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.cucum.tot <- data_summary(df3.BI.cucum.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.cucum.tot <- select (df3.BI.cucum.tot, -c(3, 5))
+colnames(df3.BI.cucum.tot)[which(names(df3.BI.cucum.tot) == "sum")] <- "Density.ha.tot"
+
+### Species total (to set category Other)
+df3.BI.cucum.tot.spec <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Genus", "Survey"))
+df3.BI.cucum.tot.spec <- data_summary(df3.BI.cucum.tot.spec, varname = "sum", groupnames = c("Genus"))
+df3.BI.cucum.tot.spec <- select (df3.BI.cucum.tot.spec, -c(2, 4))
+colnames(df3.BI.cucum.tot.spec)[which(names(df3.BI.cucum.tot.spec) == "sum")] <- "Density.ha.tot"
+df3.BI.cucum.tot.spec$Density.pct <- df3.BI.cucum.tot.spec$Density.ha.tot / sum(df3.BI.cucum.tot.spec$Density.ha.tot) * 100 
+df3.BI.cucum.tot.spec$Genus.o <- ifelse(df3.BI.cucum.tot.spec$Density.pct > 1, df3.BI.cucum.tot.spec$Genus, "Other")
+df3.BI.cucum.tot.spec <- select (df3.BI.cucum.tot.spec, -c(2:4))
+df3.BI.cucum <- left_join(df3.BI.cucum, df3.BI.cucum.tot.spec, by = "Genus")
+
+### Per species
+df3.BI.cucum.spec <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
+df3.BI.cucum.spec <- data_summary(df3.BI.cucum.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
+df3.BI.cucum.spec <- select (df3.BI.cucum.spec, -c(4, 6, 7, 8))
+colnames(df3.BI.cucum.spec)[which(names(df3.BI.cucum.spec) == "sum")] <- "Density.ha"
+
+### Merge
+df3.BI.cucum.tot <- select (df3.BI.cucum.tot, -c("Group"))
+df3.BI.cucum.spec <- left_join(df3.BI.cucum.spec, df3.BI.cucum.tot, by = "Treatment")
+
+## SEA STARS
+df3.BI.star <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Seastars"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Seastars")))
+
+### Summarize to level of genus (not species)
+df3.BI.star$Genus <- word(df3.BI.star$Species, 1)
+df3.BI.star <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Treatment","Group", "Genus", "Survey"))
+df3.BI.star <- select (df3.BI.star, -c(6:9))
+colnames(df3.BI.star)[which(names(df3.BI.star) == "sum")] <- "Density.ha"
+
+### Total
+df3.BI.star.tot <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.star.tot <- data_summary(df3.BI.star.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.star.tot <- select (df3.BI.star.tot, -c(3, 5))
+colnames(df3.BI.star.tot)[which(names(df3.BI.star.tot) == "sum")] <- "Density.ha.tot"
+
+### Species total (to set category Other)
+df3.BI.star.tot.spec <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Genus", "Survey"))
+df3.BI.star.tot.spec <- data_summary(df3.BI.star.tot.spec, varname = "sum", groupnames = c("Genus"))
+df3.BI.star.tot.spec <- select (df3.BI.star.tot.spec, -c(2, 4))
+colnames(df3.BI.star.tot.spec)[which(names(df3.BI.star.tot.spec) == "sum")] <- "Density.ha.tot"
+df3.BI.star.tot.spec$Density.pct <- df3.BI.star.tot.spec$Density.ha.tot / sum(df3.BI.star.tot.spec$Density.ha.tot) * 100 
+df3.BI.star.tot.spec$Genus.o <- ifelse(df3.BI.star.tot.spec$Density.pct > 1, df3.BI.star.tot.spec$Genus, "Other")
+df3.BI.star.tot.spec <- select (df3.BI.star.tot.spec, -c(2:4))
+df3.BI.star <- left_join(df3.BI.star, df3.BI.star.tot.spec, by = "Genus")
+
+### Per species
+df3.BI.star.spec <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
+df3.BI.star.spec <- data_summary(df3.BI.star.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
+df3.BI.star.spec <- select (df3.BI.star.spec, -c(4, 6, 7, 8))
+colnames(df3.BI.star.spec)[which(names(df3.BI.star.spec) == "sum")] <- "Density.ha"
+
+### Merge
+df3.BI.star.tot <- select (df3.BI.star.tot, -c("Group"))
+df3.BI.star.spec <- left_join(df3.BI.star.spec, df3.BI.star.tot, by = "Treatment")
+
+```
+
+# Unused graphs
+```{r unused, eval=FALSE}
+
+# ---- PER TREATMENT ----
+
+# SNAILS & URCHINS 2022
+ggplot(df3.BI.22.avg, aes(fill=Treatment, y=Density.m2, x=Group))+ 
+    geom_bar(position="dodge", stat="identity")+
+    geom_errorbar(aes(ymin=Density.m2-(1*se), ymax=Density.m2+(1*se)), width=.2, position=position_dodge(.9))+
+   # geom_text(data = df3.BC.ss.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+    scale_fill_manual(values = c("#D3D3D3", "#C0C0C0", "#A9A9A9", "#808080", "#708090", "#2F4F4F"))+
+    labs(y = expression(paste("Density ( ", ha^-1,")")), x = "Group", fill = "Treatment")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Snails & Urchins 2022.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# OTHER INVERTEBRATES  2022
+ggplot(df3.BI.22.avg.o, aes(fill=Treatment, y=Density.ha, x=Group)) + 
+    geom_bar(position="dodge", stat="identity")+
+    geom_errorbar(aes(ymin=Density.ha-(1*se), ymax=Density.ha+(1*se)), width=.2, position=position_dodge(.9))+
+   # geom_text(data = df3.BC.ss.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+    scale_fill_manual(values = c("#D3D3D3", "#C0C0C0", "#A9A9A9", "#808080", "#708090", "#2F4F4F"))+
+    labs(y = expression(paste("Density ( ", ha^-1,")")), x = "Group", fill = "Treatment")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Other 2022.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+## Snails & Urchins in 2020
+ggplot(df3.BI.20.avg, aes(fill=Treatment, y=Density.m2, x=Group)) + 
+    geom_bar(position="dodge", stat="identity")+
+    geom_errorbar(aes(ymin=Density.m2-(1*se), ymax=Density.m2+(1*se)), width=.2, position=position_dodge(.9))+
+   # geom_text(data = df3.BC.ss.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+    scale_fill_manual(values = c("#D3D3D3", "#C0C0C0", "#A9A9A9", "#808080", "#708090", "#2F4F4F"))+
+    labs(y = expression(paste("Density ( ", ha^-1,")")), x = "Group", fill = "Treatment")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Snails & Urchins 2020.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+## Other Invertebrates in 2020
+ggplot(df3.BI.20.avg.o, aes(fill=Treatment, y=Density.ha, x=Group)) + 
+    geom_bar(position="dodge", stat="identity")+
+    geom_errorbar(aes(ymin=Density.ha-(1*se), ymax=Density.ha+(1*se)), width=.2, position=position_dodge(.9))+
+   # geom_text(data = df3.BC.ss.fig, aes(x=Treatment, y = Cover + (1*se), label = siglet.loc), 
+   #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+    scale_fill_manual(values = c("#D3D3D3", "#C0C0C0", "#A9A9A9", "#808080", "#708090", "#2F4F4F"))+
+    labs(y = expression(paste("Density ( ", ha^-1,")")), x = "Group", fill = "Treatment")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Other 2020.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+
+# ---- Through Time ----
+## Snails & Urchins
+ggplot(df3.BI.years.Snur, aes(fill=Group, y=Density.m2, x=Year)) + 
+    facet_grid(.~Treatment)+
+    geom_bar(position="dodge", stat="identity")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Snails & Urchins through Time.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# Other invertebrates
+ggplot(df3.BI.years.o, aes(fill=Group, y=Density.ha, x=Year)) + 
+    facet_grid(.~Treatment)+
+    geom_bar(position="dodge", stat="identity")+
+    scale_y_continuous(expand = c(0,0))+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-2, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm")
+      )
+ggsave("Benthic invertebrates_Others through Time.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+```
+
+# Graphs
+```{r graphs}
+
+
+
+# Corallivorous snails by genus
+  ggplot(df3.BI.snail.spec) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = forcats::fct_rev(Species)))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+ #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.snail.spec[(df3.BI.snail.spec$Species=="Drupella"),],
+           stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Species), alpha=0, size=1, color="black")+
+  scale_fill_manual(values = c( "#999999", "#323232"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Corallivorous snails ( ", m^-2,")")), x = "Treatment", fill = "Genus")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.95))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.background = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Benthic invertebrates_2022_Corallivorous snails.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# Urchins by genus
+  ggplot(df3.BI.urchins.spec) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+ #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.urchins.spec[(df3.BI.urchins.spec$Genus.o=="Echinostrephus"),],
+           stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Sea urchins ( ", m^-2,")")), x = "Treatment", fill = "Genus")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.5))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.background = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Benthic invertebrates_2022_Urchins.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# Gastropods by family
+  ggplot(df3.BI.gastro.spec) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+ #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.gastro.spec[(df3.BI.gastro.spec$Genus.o=="Cypraeidae"),],
+           stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Gastropods ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.background = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Benthic invertebrates_2022_Gastropods.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# Octopus?
+
+# Sea cucumbers by genus
+ ggplot(df3.BI.cucum.spec) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+ #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.cucum.spec[(df3.BI.cucum.spec$Genus.o=="Holothuria"),],
+           stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Sea cucumbers ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.background = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Benthic invertebrates_2022_Sea cucumbers.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+# Sea stars by genus
+ ggplot(df3.BI.star.spec) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
+ #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.star.spec[(df3.BI.star.spec$Genus.o=="Linckia"),],
+           stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Sea stars ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.background = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+ggsave("Benthic invertebrates_2022_Stars.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
+````
+
+

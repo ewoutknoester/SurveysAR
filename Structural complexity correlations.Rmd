@@ -5,7 +5,7 @@ date: "17/08/2022"
 output: html_document
 ---
 
-# TODO: correlation urchins abundance - recruits
+# TODO: Layout of graphs
 
 ```{r setup, include=FALSE}
 
@@ -60,6 +60,7 @@ df2.ARCover <- read_excel("Correlation data/Structural complexity_Correlations_A
 df2.Frags <- read_excel("Correlation data/Structural complexity_Correlations_Fragments.xlsx")
 df2.Frags$Survival <- df2.Frags$Survival * 100
 df2.Recruits <- read_excel("Correlation data/Structural complexity_Correlations_Recruits.xlsx")
+df2.Urchins <- read_excel("Correlation data/Structural complexity_Correlations_Urchins.xlsx")
 
 # Tidy data
 df2.ARCover <- spread(df2.ARCover, key = Functional.group, value = Cover)
@@ -80,6 +81,23 @@ df2.ARCoverxFragments <- select(df2.ARCoverxFragments.tot, c("Survival", "Hard c
                               "Sponge", "Tunicate", "Macroalgae", "EAM", "Other", "Hard substrate", "Soft substrate",
                               "Fouling"))
 
+df2.UrchinsxRecruits <- data_summary(df2.Recruits, varname = "Recruits.N", groupnames = c("Patch"))
+df2.UrchinsxRecruits <- select(df2.UrchinsxRecruits, c("Patch", "sum"))
+df2.UrchinsxRecruits$Recruits.m2 <- df2.UrchinsxRecruits$sum / 16
+df2.Urchins <- data_summary(df2.Urchins, varname = "Density.m2.tot", groupnames = c("Transect"))
+df2.Urchins <- subset(df2.Urchins, Transect != "(NT-C-3)")
+df2.UrchinsxRecruits$Urchins.m2 <- df2.Urchins$Density.m2.tot
+df2.UrchinsxRecruits <- subset(df2.UrchinsxRecruits, grepl("BRU", df2.UrchinsxRecruits$Patch) | 
+                                                     grepl("CAGE", df2.UrchinsxRecruits$Patch) |
+                                                     grepl("CAKE", df2.UrchinsxRecruits$Patch) |
+                                                     grepl("COMP", df2.UrchinsxRecruits$Patch))
+df2.UrchinsxRecruits.fig <- df2.UrchinsxRecruits
+df2.UrchinsxRecruits <- select(df2.UrchinsxRecruits, -c("Patch", "sum"))
+df2.UrchinsxRecruits.fig$Treatment <- ifelse(grepl("BRU",  df2.UrchinsxRecruits.fig$Patch), "BRU", 
+                                      ifelse(grepl("CAKE", df2.UrchinsxRecruits.fig$Patch), "Cake",
+                                      ifelse(grepl("CAGE", df2.UrchinsxRecruits.fig$Patch), "Cage",       
+                                      ifelse(grepl("COMP", df2.UrchinsxRecruits.fig$Patch), "Compound", "Other"))))
+
 ```
 
 # Correlations
@@ -97,6 +115,17 @@ cors.ArcoverxRecruits$star <- ifelse(cors.ArcoverxRecruits$p <= 0.001, "***",
     ifelse(cors.ArcoverxRecruits$p <= 0.05, "*", "")))
 cors.ArcoverxRecruits$sum <- paste("R = ", cors.ArcoverxRecruits$r, cors.ArcoverxRecruits$star, sep = "")
 
+# URCHINS X RECRUITS
+cors.UrchinsxRecruits <- as.data.frame(correlation::correlation(df2.UrchinsxRecruits, p_adjust = "none"))
+cors.UrchinsxRecruits$ID <- paste(cors.UrchinsxRecruits$Parameter1, cors.UrchinsxRecruits$Parameter2, sep = "X")
+cors.UrchinsxRecruits <- cors.UrchinsxRecruits[c(3, 9, 12)]
+cors.UrchinsxRecruits$r <- round(cors.UrchinsxRecruits$r, 2)
+cors.UrchinsxRecruits$p <- round(cors.UrchinsxRecruits$p, 2)
+cors.UrchinsxRecruits$star <- ifelse(cors.UrchinsxRecruits$p <= 0.001, "***",
+  ifelse(cors.UrchinsxRecruits$p <= 0.01, "**", 
+    ifelse(cors.UrchinsxRecruits$p <= 0.05, "*", "")))
+cors.UrchinsxRecruits$sum <- paste("R = ", cors.UrchinsxRecruits$r, cors.UrchinsxRecruits$star, sep = "")
+
 # ARCOVER x FRAGMENT SURVIVAL
 cors.ArcoverxFragments <- as.data.frame(correlation::correlation(df2.ARCoverxFragments, p_adjust = "none"))
 cors.ArcoverxFragments <- cors.ArcoverxFragments[grepl("Survival", cors.ArcoverxFragments$Parameter1), ]
@@ -108,6 +137,7 @@ cors.ArcoverxFragments$star <- ifelse(cors.ArcoverxFragments$p <= 0.001, "***",
   ifelse(cors.ArcoverxFragments$p <= 0.01, "**", 
     ifelse(cors.ArcoverxFragments$p <= 0.05, "*", "")))
 cors.ArcoverxFragments$sum <- paste("R = ", cors.ArcoverxFragments$r, cors.ArcoverxFragments$star, sep = "")
+
 
 ```
 
@@ -220,6 +250,32 @@ ggplot(df2.ARCoverxRecruits.tot.NQ, aes(x = Fouling, y = Recruits.M2, color = St
     plot.margin = margin(c(5,5,5,5), "cm")
     )
 #ggsave("Correlations_Fouling x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# URCHINS X RECRUITS
+ggplot(df2.UrchinsxRecruits.fig, aes(x = Urchins.m2, y = Recruits.m2, color = Treatment)) + 
+  scale_x_continuous(expression(paste("Urchins (", m^-2,")")))+
+  scale_y_continuous(expression(paste("Recruits (", m^-2,")")), label = waiver ())+
+  geom_point(size = 2) +
+  #scale_fill_manual(values = c("#ff930b","#D34000", "#860000",  "#ffff6f", "#FF5DD3"))+
+  geom_smooth(method=lm,  linetype="dashed", color="darkred", fill="blue")+
+  theme(
+    text = element_text(size = 12),
+    axis.title.x = element_text(color="black", vjust=-1, size = 12),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    axis.title.y = element_text(color="black", size = 12, vjust=1),
+    axis.text.y = element_text(angle = 0, size=12, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype=1),
+    panel.border = element_rect(colour = "white", fill=NA, size=0.5),
+    legend.key = element_rect(fill = "#FCFCFC"),
+    legend.text = element_text(colour="black", size=10, face="italic"),
+    legend.box = "vertical",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour="#FCFCFC", size=0.1),
+    plot.margin = margin(c(5,5,5,5), "cm")
+    )
+ggsave("Correlations_Hard substrate x Recruits.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # HARD CORAL SURVIVAL X HARD CORAL COVER
 ggplot(df2.ARCoverxFragments.tot, aes(x = Survival, y = `Hard coral`, color = Structure)) + 

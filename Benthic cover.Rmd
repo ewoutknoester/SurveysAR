@@ -876,42 +876,53 @@ ggplot(df3.BC.ss.fig, aes(x = Treatment, y = Cover))+
 # Treatments in 2022
 ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#EAEDED", "#909497", "#424949", "#229954", "#F9E79F", "#E67E22"))+
-    labs(y = "Benthic cover (%)", x = "Treatment", fill = "Substrate")+
-    scale_y_continuous(expand = c(0,0))+
+    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#9e9e9e", "#0d6936", "#f5e298", "#db781b"),
+                      labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
+    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+    labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
+    scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
     theme(
-      axis.title.x = element_text(color="black", vjust=-2, size = 14),
-      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
-      axis.title.y = element_text(color="black" , vjust=4, size = 14),
-      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
       panel.background = element_rect(fill = "#FCFCFC"),
       plot.background = element_rect(fill = "#FFFFFF"),
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Benthic cover_Benthic cover 2022.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+ggsave("Benthic cover_Benthic cover 2022.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # Treatments in 2020
 ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#EAEDED", "#909497", "#424949", "#229954", "#F9E79F", "#E67E22"))+
-    labs(y = "Benthic cover (%)", x = "Treatment", fill = "Substrate")+
-    scale_y_continuous(expand = c(0,0))+
+    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#9e9e9e", "#0d6936", "#f5e298", "#db781b"),
+                      labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
+    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+    labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
+    scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
     theme(
-      axis.title.x = element_text(color="black", vjust=-2, size = 14),
-      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
-      axis.title.y = element_text(color="black" , vjust=4, size = 14),
-      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
+      axis.title.x = element_text(color="black", vjust=-3, size = 14),
+      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.y = element_text(color="black" , vjust=0, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
+      legend.position = "right",
+      legend.key.size = unit(1.2, "lines"),
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 12, face = "bold"),
       panel.background = element_rect(fill = "#FCFCFC"),
       plot.background = element_rect(fill = "#FFFFFF"),
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Benthic cover_Benthic cover 2020.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+ggsave("Benthic cover_Benthic cover 2020.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+
 
 # HARD CORAL BY GENUS
 ## Legend
@@ -970,7 +981,7 @@ HC.SE <- ggplot(df3.HC.sum) +
     legend.text = element_text(size = 11, face = "italic"),
     axis.title.x = element_text(size = 14, vjust = -2),
     axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 4),
+    axis.title.y = element_text( size = 14, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),

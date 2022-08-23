@@ -11,17 +11,7 @@ rm(list=ls()) # Clear workspace
 knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
 options(scipen = 50) # Have all numbers in non-scientific notation
 
-library(car) # Anovas
-library(cowplot) # Plot grid
-library(data.table)
-library(emmeans) # Pairwise comparisons
-library(flextable) # Layout word table
 library(ggthemes) # pretty plots
-library(NCmisc) # Check packages used
-library(nlme) # GLS
-library(betareg) # Beta regression
-library(officer) # Move table into word
-library(panelr) # Convert data from wide to long
 library(plyr) # Join (vlookup)
 library(readxl) # Import excel sheets
 library(tidyverse) # Data manipulation and plotting
@@ -51,7 +41,7 @@ data_summary <- function(data, varname, groupnames){
 df0.raw <- read.csv("Raw data/Coralnet_Annotations_Structural complexity_2022-08.csv")
 
 # Select relevant columns
-df1.clean <- select(df0.raw, c("Name","Date", "Site", "Patch", "Treatment", "Structure", "Label"))
+df1.clean <- select(df0.raw, c("Name", "Date", "Site", "Patch", "Treatment", "Structure", "Label"))
 colnames(df1.clean)[which(names(df1.clean) == "Name")] <- "Pic"
 
 # Get full names and functional groups from labelset
@@ -66,7 +56,7 @@ df1.clean <- left_join(df1.clean, labelset, by = "Label")
 colnames(df1.clean)[which(names(df1.clean) == "Structure")] <- "Number"
 colnames(df1.clean)[which(names(df1.clean) == "Treatment")] <- "Structure"
 
-df1.clean$Treatment <- ifelse(grepl("BRU", df1.clean$Patch), "BRU", 
+df1.clean$Treatment <- ifelse(grepl("BRU", df1.clean$Patch),  "BRU", 
                        ifelse(grepl("CAKE", df1.clean$Patch), "Cake",
                        ifelse(grepl("CAGE", df1.clean$Patch), "Cage",       
                        ifelse(grepl("COMP", df1.clean$Patch), "Compound",
@@ -83,30 +73,26 @@ write_xlsx(df1.clean, "Structural complexity_AR cover_2022-08.xlsx")
 # Data prep 
 <!--
 Data info:
-  Data of several types of benthic surveys
-  Dead corals were classified as Dead when the genus could still be recognized or as Bare rock when not
+  50 random points from Coralnet, all AI ID confirmed by Ewout Knoester
+  All 870 structures/pictures from the Structural Complexity experiment
+  Pictures cropped so Soft substrate (Sand, Rubble, Seagrass) is ommited as much as possible: focus on benthos on Hard substrate
 -->
 ```{r data prep}
 
 # Load data
 df2.selex <- read_excel("Structural complexity_AR cover_2022-08.xlsx")
 
-## Set groups
-#df2.selex$Super.group[df2.selex$Super.group == "Bare substrate"] <- "Soft substrate"
-
 # Set order of substrates
-df2.selex$Functional.group <- factor(df2.selex$Functional.group,  levels=c("Not applicable","Soft substrate", "Hard substrate", "EAM", "Other",  "Sponge", "Tunicate", "Hydroid", "Macroalgae", "Soft coral", "Hard coral"))
+df2.selex$Functional.group <- factor(df2.selex$Functional.group,  levels=c("Not applicable", "Soft substrate", "Hard substrate", "EAM", "Other",  "Sponge", "Tunicate", "Hydroid", "Macroalgae", "Soft coral", "Hard coral"))
 
-# SUBSETS
-# --- AR COVER ---
+# Select relevant columns
 df3.ARC <- select(df2.selex, c('Pic', 'Site', 'Treatment', 'Patch', 'Structure', 'Number', 'Functional.group'))
 
-# Select surveys
-## Leave out points outside frame
+# Leave out points on/outside frame
 df3.ARC <- subset(df3.ARC, Functional.group != "Not applicable")
-df3.ARC$Functional.group <- factor(df3.ARC$Functional.group)
+df3.ARC$Functional.group <- factor(df3.ARC$Functional.group) # Remove empty factor levels
 
-# Get total counts per survey (not always 50 because of Not applicable points removed)
+# Get total counts per survey (not always 50 because `Not applicable` points removed)
 df3.ARC.counts <- df3.ARC %>%
           group_by(Pic) %>%
           tally()
@@ -120,7 +106,9 @@ df3.ARC <- df3.ARC %>%
 df3.ARC <- left_join(df3.ARC, df3.ARC.counts, by = "Pic") # Combine data frames
 df3.ARC$Cover <- df3.ARC$n.x / df3.ARC$n.y * 100 
 
-df3.ARC.Structure <- data_summary(df3.ARC, varname = "Cover", groupnames = c("Treatment", "Patch", "Structure", "Number", "Functional.group"))
+# Summarize per Structure
+df3.ARC.Structure <- data_summary(df3.ARC, varname = "Cover", 
+                                  groupnames = c("Treatment", "Patch", "Structure", "Number", "Functional.group"))
 df3.ARC.Structure <- select (df3.ARC.Structure, -c("sum", "sd", "n", "se"))
 write_xlsx(df3.ARC.Structure, "Correlation data/Structural complexity_Correlations_AR cover.xlsx")
 
