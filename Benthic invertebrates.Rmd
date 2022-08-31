@@ -3,9 +3,10 @@ title: "Benthic invertebrates"
 author: "Ewout Knoester"
 date: "22/08/2022"
 output: html_document
+code_folding: hide
 ---
 
-
+#TODO: Layout of graphs
 
 ```{r setup, include=FALSE}
 
@@ -262,17 +263,20 @@ colnames(df3.BI.years.o)[which(names(df3.BI.years.o) == "sum")] <- "Density.ha"
 
 # ---- PER GROUP AND SPECIES ----
 
-## CORALLIVOROUS SNAILS
+## ==== CORALLIVOROUS SNAILS ====
 df3.BI.snail <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
                                Year == 2022 & (Group == "Corallivorous.snails"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
                                (Group == "Corallivorous.snails")))
 
+### Model
+df3.BI.snail.mod <- data_summary(df3.BI.snail, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.snail.mod <- select (df3.BI.snail.mod, -c(5:8))
+colnames(df3.BI.snail.mod)[which(names(df3.BI.snail.mod) == "sum")] <- "Density.m2.tot"
+
 ### Total
-df3.BI.snail.tot <- data_summary(df3.BI.snail, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
-df3.BI.snail.tot <- data_summary(df3.BI.snail.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.snail.tot <- data_summary(df3.BI.snail.mod, varname = "Density.m2.tot", groupnames = c("Group", "Treatment"))
 df3.BI.snail.tot <- select (df3.BI.snail.tot, -c(3, 5))
-colnames(df3.BI.snail.tot)[which(names(df3.BI.snail.tot) == "sum")] <- "Density.m2.tot"
 
 ### Per species
 df3.BI.snail.spec <- data_summary(df3.BI.snail, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey", "Species"))
@@ -286,7 +290,7 @@ df3.BI.snail.tot <- select (df3.BI.snail.tot, -c("Group", "Treatment"))
 df3.BI.snail.spec$Namer <- paste(df3.BI.snail.spec$Treatment, df3.BI.snail.spec$Group, sep = ".")
 df3.BI.snail.spec <- left_join(df3.BI.snail.spec, df3.BI.snail.tot, by = "Namer")
 
-## URCHINS
+## ==== URCHINS ====
 df3.BI.urchin <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
                                Year == 2022 & (Group == "Urchins"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
@@ -294,15 +298,19 @@ df3.BI.urchin <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | 
 
 ### Summarize to level of genus (not species)
 df3.BI.urchin$Genus <- word(df3.BI.urchin$Species, 1)
-df3.BI.urchin <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Treatment","Group", "Genus", "Survey"))
-df3.BI.urchin <- select (df3.BI.urchin, -c(6:9))
+df3.BI.urchin <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Treatment","Group", "Genus", "Survey", "Transect"))
+df3.BI.urchin <- select (df3.BI.urchin, -c(7:10))
 colnames(df3.BI.urchin)[which(names(df3.BI.urchin) == "sum")] <- "Density.m2"
 
+### Model
+df3.BI.urchin.mod <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey", "Transect"))
+df3.BI.urchin.mod <- select (df3.BI.urchin.mod, -c(6:9))
+colnames(df3.BI.urchin.mod)[which(names(df3.BI.urchin.mod) == "sum")] <- "Density.m2.tot"
+write_xlsx(df3.BI.urchin.mod, "Correlation data/Structural complexity_Correlations_Urchins.xlsx")
+
 ### Total
-df3.BI.urchin.tot <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Group", "Treatment", "Survey"))
-df3.BI.urchin.tot <- data_summary(df3.BI.urchin.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.urchin.tot <- data_summary(df3.BI.urchin.mod, varname = "Density.m2.tot", groupnames = c("Group", "Treatment"))
 df3.BI.urchin.tot <- select (df3.BI.urchin.tot, -c(3, 5))
-colnames(df3.BI.urchin.tot)[which(names(df3.BI.urchin.tot) == "sum")] <- "Density.m2.tot"
 
 ### Species total (to set category Other)
 df3.BI.urchin.tot.spec <- data_summary(df3.BI.urchin, varname = "Density.m2", groupnames = c("Genus", "Survey"))
@@ -324,7 +332,7 @@ colnames(df3.BI.urchins.spec)[which(names(df3.BI.urchins.spec) == "sum")] <- "De
 df3.BI.urchin.tot <- select (df3.BI.urchin.tot, -c("Group"))
 df3.BI.urchins.spec <- left_join(df3.BI.urchins.spec, df3.BI.urchin.tot, by = "Treatment")
 
-## GASTROPODS
+## ==== GASTROPODS ====
 df3.BI.gastro <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
                                Year == 2022 & (Group == "Gastropods"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
@@ -344,11 +352,14 @@ df3.BI.gastro <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames 
 df3.BI.gastro <- select (df3.BI.gastro, -c(6:9))
 colnames(df3.BI.gastro)[which(names(df3.BI.gastro) == "sum")] <- "Density.ha"
 
+### Model
+df3.BI.gastro.mod <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.gastro.mod <- select (df3.BI.gastro.mod, -c(5:8))
+colnames(df3.BI.gastro.mod)[which(names(df3.BI.gastro.mod) == "sum")] <- "Density.ha.tot"
+
 ### Total
-df3.BI.gastro.tot <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
-df3.BI.gastro.tot <- data_summary(df3.BI.gastro.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.gastro.tot <- data_summary(df3.BI.gastro.mod, varname = "Density.ha.tot", groupnames = c("Group", "Treatment"))
 df3.BI.gastro.tot <- select (df3.BI.gastro.tot, -c(3, 5))
-colnames(df3.BI.gastro.tot)[which(names(df3.BI.gastro.tot) == "sum")] <- "Density.ha.tot"
 
 ### Species total (to set category Other)
 df3.BI.gastro.tot.spec <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Genus", "Survey"))
@@ -370,7 +381,17 @@ colnames(df3.BI.gastro.spec)[which(names(df3.BI.gastro.spec) == "sum")] <- "Dens
 df3.BI.gastro.tot <- select (df3.BI.gastro.tot, -c("Group"))
 df3.BI.gastro.spec <- left_join(df3.BI.gastro.spec, df3.BI.gastro.tot, by = "Treatment")
 
-## SEA CUCUMBERS
+## ==== OCTOPUS ====
+df3.BI.octo <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
+                               Year == 2022 & (Group == "Octopus"))  | 
+                               ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
+                               (Group == "Octopus")))
+
+# Summarize for fig
+df3.BI.octo.fig <- data_summary(df3.BI.octo, varname = "Density.ha", groupnames = c("Treatment"))
+df3.BI.octo.fig <- select (df3.BI.octo.fig, -c(2, 4))
+
+## ==== SEA CUCUMBERS ====
 df3.BI.cucum <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
                                Year == 2022 & (Group == "Seacucumbers"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
@@ -382,11 +403,14 @@ df3.BI.cucum <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = 
 df3.BI.cucum <- select (df3.BI.cucum, -c(6:9))
 colnames(df3.BI.cucum)[which(names(df3.BI.cucum) == "sum")] <- "Density.ha"
 
+### Model
+df3.BI.cucum.mod <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.cucum.mod <- select (df3.BI.cucum.mod, -c(5:8))
+colnames(df3.BI.cucum.mod)[which(names(df3.BI.cucum.mod) == "sum")] <- "Density.ha.tot"
+
 ### Total
-df3.BI.cucum.tot <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
-df3.BI.cucum.tot <- data_summary(df3.BI.cucum.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.cucum.tot <- data_summary(df3.BI.cucum.mod, varname = "Density.ha.tot", groupnames = c("Group", "Treatment"))
 df3.BI.cucum.tot <- select (df3.BI.cucum.tot, -c(3, 5))
-colnames(df3.BI.cucum.tot)[which(names(df3.BI.cucum.tot) == "sum")] <- "Density.ha.tot"
 
 ### Species total (to set category Other)
 df3.BI.cucum.tot.spec <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Genus", "Survey"))
@@ -408,7 +432,7 @@ colnames(df3.BI.cucum.spec)[which(names(df3.BI.cucum.spec) == "sum")] <- "Densit
 df3.BI.cucum.tot <- select (df3.BI.cucum.tot, -c("Group"))
 df3.BI.cucum.spec <- left_join(df3.BI.cucum.spec, df3.BI.cucum.tot, by = "Treatment")
 
-## SEA STARS
+## ==== SEA STARS ====
 df3.BI.star <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
                                Year == 2022 & (Group == "Seastars"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
@@ -420,11 +444,14 @@ df3.BI.star <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c(
 df3.BI.star <- select (df3.BI.star, -c(6:9))
 colnames(df3.BI.star)[which(names(df3.BI.star) == "sum")] <- "Density.ha"
 
+### Model
+df3.BI.star.mod <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
+df3.BI.star.mod <- select (df3.BI.star.mod, -c(5:8))
+colnames(df3.BI.star.mod)[which(names(df3.BI.star.mod) == "sum")] <- "Density.ha.tot"
+
 ### Total
-df3.BI.star.tot <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey"))
-df3.BI.star.tot <- data_summary(df3.BI.star.tot, varname = "sum", groupnames = c("Group", "Treatment"))
+df3.BI.star.tot <- data_summary(df3.BI.star.mod, varname = "Density.ha.tot", groupnames = c("Group", "Treatment"))
 df3.BI.star.tot <- select (df3.BI.star.tot, -c(3, 5))
-colnames(df3.BI.star.tot)[which(names(df3.BI.star.tot) == "sum")] <- "Density.ha.tot"
 
 ### Species total (to set category Other)
 df3.BI.star.tot.spec <- data_summary(df3.BI.star, varname = "Density.ha", groupnames = c("Genus", "Survey"))
@@ -445,6 +472,141 @@ colnames(df3.BI.star.spec)[which(names(df3.BI.star.spec) == "sum")] <- "Density.
 ### Merge
 df3.BI.star.tot <- select (df3.BI.star.tot, -c("Group"))
 df3.BI.star.spec <- left_join(df3.BI.star.spec, df3.BI.star.tot, by = "Treatment")
+
+```
+
+# Model
+```{r model}
+
+# CORALLIVOROUS SNAILS
+## Allowing for heterogeneity and square-root transformation both improved residuals
+gls.snail.1wsq  <- gls(sqrt(Density.m2.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.snail.mod)
+
+## Output
+anova(gls.snail.1wsq)
+
+# SEA URCHINS
+## Allowing for heterogeneity and square-root transformation both improved residuals
+gls.urchin.1wsq  <- gls(sqrt(Density.m2.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.urchin.mod)
+
+## Output
+anova(gls.urchin.1wsq)
+
+# GASTROPODS
+## Allowing for heterogeneity and square-root transformation both improved residuals
+gls.gastro.1wsq  <- gls(sqrt(Density.ha.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.gastro.mod)
+
+## Output
+anova(gls.gastro.1wsq) # ns
+
+# OCTOPUS
+## Allowing for heterogeneity and square-root transformation did NOT improve residuals
+gls.octo.1  <- gls(Density.ha ~ Treatment, data = df3.BI.octo)
+
+## Output
+anova(gls.octo.1) # ns
+
+# SEA CUCUMBERS
+## Unable to allow for heterogeneity, square-root transformation did improve residuals
+gls.cucum.1sq  <- gls(sqrt(Density.ha.tot) ~ Treatment, data = df3.BI.cucum.mod)
+
+## Output
+anova(gls.cucum.1sq) # ns
+
+# SEA STARS
+## Allowing for heterogeneity did NOT, but square-root transformation did improve residuals
+gls.star.1  <- gls(Density.ha.tot ~ Treatment, data = df3.BI.star.mod)
+gls.star.1sq  <- gls(sqrt(Density.ha.tot) ~ Treatment, data = df3.BI.star.mod)
+gls.star.1w  <- gls(Density.ha.tot ~ Treatment,  weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.star.mod)
+gls.star.1wsq  <- gls(sqrt(Density.ha.tot) ~ Treatment,  weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.star.mod)
+
+## Output
+anova(gls.star.1sq) # ns
+
+```
+
+# Model validation
+```{r model validation}
+
+# CORALLIVOROUS SNAILS
+mod <- gls.snail.1wsq # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.snail.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ sqrt(df3.BI.snail.mod$Density.m2.tot)) # response data vs fitted
+par(op)
+
+# SEA URCHINS
+mod <- gls.urchin.1wsq # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.urchin.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ sqrt(df3.BI.urchin.mod$Density.m2.tot)) # response data vs fitted
+par(op)
+
+# GASTROPODS
+mod <- gls.gastro.1wsq # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.urchin.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ sqrt(df3.BI.gastro.mod$Density.ha.tot)) # response data vs fitted
+par(op)
+
+# OCTOPUS
+mod <- gls.octo.1 # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.octo$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ df3.BI.octo$Density.ha) # response data vs fitted
+par(op)
+
+# SEA CUCUMBERS
+mod <- gls.cucum.1sq # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.cucum.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ sqrt(df3.BI.cucum.mod$Density.ha.tot)) # response data vs fitted
+par(op)
+
+# SEA STARS
+mod <- gls.star.1sq # set model to be validated
+op <- par(mfrow = c(2, 3), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.BI.star.mod$Treatment, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(fitted(mod) ~ sqrt(df3.BI.star.mod$Density.ha.tot)) # response data vs fitted
+par(op)
+
+```
+
+# Post hoc
+```{r post hoc}
+
+hsd.snail <- emmeans(gls.snail.1wsq, specs = pairwise ~ Treatment, adjust = "tukey", type = "response", mode = "df.error")
+hsd.urchin <- emmeans(gls.urchin.1wsq, specs = pairwise ~ Treatment, adjust = "tukey", type = "response", mode = "df.error")
 
 ```
 
@@ -602,15 +764,24 @@ ggsave("Benthic invertebrates_Others through Time.tiff", width = 18, height = 8,
 # Graphs
 ```{r graphs}
 
+# ---- CORALLIVOROUS SNAILS ----
+## Post hoc letters
+sigletters.snail <- multcomp::cld(hsd.snail$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+sigletters.snail <- sigletters.snail %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+sigletters.snail <- select(sigletters.snail, c("Treatment", ".group"))
 
+# Merge CLD
+df3.BI.snail.fig <- left_join(df3.BI.snail.spec, sigletters.snail, by = 'Treatment')
+df3.BI.snail.fig$siglet <- ifelse(df3.BI.snail.fig$Species  == 'Drupella', df3.BI.snail.fig$.group, "")
 
-# Corallivorous snails by genus
-  ggplot(df3.BI.snail.spec) +  
+## Corallivorous snails by genus
+ggplot(df3.BI.snail.fig) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = forcats::fct_rev(Species)))+
-  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
- #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
-  geom_bar(data=df3.BI.snail.spec[(df3.BI.snail.spec$Species=="Drupella"),],
+  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1,
+                position=position_dodge(.9))+
+  geom_text(data=df3.BI.snail.fig, aes(x=Treatment, y = Density.m2.tot + (1*se), label = siglet), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.snail.fig[(df3.BI.snail.fig$Species=="Drupella"),],
            stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Species), alpha=0, size=1, color="black")+
   scale_fill_manual(values = c( "#999999", "#323232"))+
   theme_economist()+scale_colour_economist()+
@@ -635,13 +806,24 @@ ggsave("Benthic invertebrates_Others through Time.tiff", width = 18, height = 8,
     )
 ggsave("Benthic invertebrates_2022_Corallivorous snails.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
+# ---- SEA URCHINS ----
+## Post hoc letters
+sigletters.urchin <- multcomp::cld(hsd.urchin$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+sigletters.urchin <- sigletters.urchin %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+sigletters.urchin <- select(sigletters.urchin, c("Treatment", ".group"))
+
+# Merge CLD
+df3.BI.urchin.fig <- left_join(df3.BI.urchins.spec, sigletters.urchin, by = 'Treatment')
+df3.BI.urchin.fig$siglet <- ifelse(df3.BI.urchin.fig$Genus.o  == 'Echinostrephus', df3.BI.urchin.fig$.group, "")
+
 # Urchins by genus
-  ggplot(df3.BI.urchins.spec) +  
+ggplot(df3.BI.urchin.fig) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = Genus.o))+
-  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
- #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
-  geom_bar(data=df3.BI.urchins.spec[(df3.BI.urchins.spec$Genus.o=="Echinostrephus"),],
+  geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)),
+                width=.2, size = 1, position=position_dodge(.9))+
+  geom_text(data = df3.BI.urchin.fig, aes(x=Treatment, y = Density.m2.tot + (1*se), label = siglet), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.BI.urchin.fig[(df3.BI.urchin.fig$Genus.o=="Echinostrephus"),],
            stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Genus.o), alpha=0, size=1, color="black")+
   scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
   theme_economist()+scale_colour_economist()+
@@ -666,12 +848,13 @@ ggsave("Benthic invertebrates_2022_Corallivorous snails.tiff", width = 18, heigh
     )
 ggsave("Benthic invertebrates_2022_Urchins.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Gastropods by family
-  ggplot(df3.BI.gastro.spec) +  
+# ---- GASTROPODS ----
+
+## Gastropods by family
+ggplot(df3.BI.gastro.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
-  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
- #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
+                width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.gastro.spec[(df3.BI.gastro.spec$Genus.o=="Cypraeidae"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
   #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
@@ -697,14 +880,36 @@ ggsave("Benthic invertebrates_2022_Urchins.tiff", width = 18, height = 8, units 
     )
 ggsave("Benthic invertebrates_2022_Gastropods.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Octopus?
+# ---- OCTOPUS ----
+ggplot(df3.BI.octo.fig, aes(x = Treatment, y = Density.ha))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = expression(paste("Octopus (", ha^-1,")")), x = "Treatment")+
+  scale_y_continuous(expand = c(0,0))+
+  geom_errorbar(aes(ymin=Density.ha-(1*se), ymax=Density.ha+(1*se)), width=.2, position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Benthic invertebrates_2022_Octopus.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Sea cucumbers by genus
- ggplot(df3.BI.cucum.spec) +  
+# ---- SEA CUCUMBERS
+## Sea cucumbers by genus
+ggplot(df3.BI.cucum.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
-  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
- #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
+                width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.cucum.spec[(df3.BI.cucum.spec$Genus.o=="Holothuria"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
   #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
@@ -730,12 +935,12 @@ ggsave("Benthic invertebrates_2022_Gastropods.tiff", width = 18, height = 8, uni
     )
 ggsave("Benthic invertebrates_2022_Sea cucumbers.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-# Sea stars by genus
- ggplot(df3.BI.star.spec) +  
+# ---- SEA STARS
+## Sea stars by genus
+ggplot(df3.BI.star.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
-  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  #geom_text(data = df3.HC.sum, aes(x=Treatment, y = Cover.tot + (1*se), label = siglet), 
- #           vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
+                width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.star.spec[(df3.BI.star.spec$Genus.o=="Linckia"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
   #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+

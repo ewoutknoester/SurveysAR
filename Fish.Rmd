@@ -1,0 +1,905 @@
+---
+title: "Fish"
+author: "Ewout Knoester"
+date: "23/08/2022"
+output: html_document
+---
+
+# TODO: split analyses & plots: 2020, 2021 (covariate Depth only; all treatments), 2021 (other covariates, ARs only)
+# TODO: references over time
+# TODO: Fix overlap labels/species ordiplots (maybe transfer to ggplot)?
+
+```{r setup}
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+options(scipen = 99) # Have all numbers in non-scientific notation
+
+library(readxl) # Join data frames (vlookup)
+library(cowplot) # Combine plots
+library(data.table)
+library(ggthemes) # pretty plots
+library(tidyverse) # Beta regression
+library(vegan) # Export Excel
+library(gridExtra)
+library(emmeans) # Select text from string
+library(lmerTest) # GLS
+library(car) # glm model validation
+library(viridis) # Convert data from wide to long
+library(pairwiseAdonis)
+
+# Function to facilitate averaging data frame
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      sd = sd(x[[col]], na.rm=TRUE),
+      sum  = sum(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+# Set colours for Treatments
+co <- c("#999999", "#E69F00", "#56B4E9", "#CC79A7","#D55E00", "#0072B2") # Colour palette
+
+```
+
+# Data selection (preparing dataset for archiving & sharing)
+```{r data selection, warning= FALSE}
+
+# ---- RAW DATA ----
+## Load and clean
+### 2021
+divRAW.2021 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2021-2022_2022-08.xlsm", sheet = 3, skip = 6))
+div.2021 <- divRAW.2021[!is.na(divRAW.2021$Species),] # Remove unrelevant row
+div.2021 <- select(div.2021, -c(1, 3:11)) # Remove unrelevant columns
+div.2021$Species <- sub("\\.", "", div.2021$Species) # Remove points from species names
+
+### 2020
+divRAW.2020 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2020_2022-08.xlsm", sheet = 3, skip = 6))
+div.2020 <- divRAW.2020[!is.na(divRAW.2020$Species),] # Remove unrelevant row
+div.2020 <- select(div.2020, -c(1, 3:11)) # Remove unrelevant columns
+div.2020$Species <- sub("\\.", "", div.2020$Species) # Remove points from species names
+
+### 2019
+divRAW.2019 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2019_2022-08.xlsm", sheet = 3, skip = 6))
+div.2019 <- divRAW.2019[!is.na(divRAW.2019$Species),] # Remove unrelevant row
+div.2019 <- select(div.2019, -c(1, 3:11)) # Remove unrelevant columns
+div.2019$Species <- sub("\\.", "", div.2019$Species) # Remove points from species names
+
+### 2018
+divRAW.2018 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2017-2018_2022-08.xlsm", sheet = 3, skip = 6))
+div.2018 <- divRAW.2018[!is.na(divRAW.2018$Species),] # Remove unrelevant row
+div.2018 <- select(div.2018, -c(1, 3:11)) # Remove unrelevant columns
+div.2018$Species <- sub("\\.", "", div.2018$Species) # Remove points from species names
+
+## Merge all years
+div <- left_join(div.2021, div.2020, by = "Species")
+div <- left_join(div, div.2019, by = "Species")
+div <- left_join(div, div.2018, by = "Species")
+
+## Get rid of the columns not needed (pre-calculated biomasses)
+div <- div[, -grep(pattern= 'g_', colnames(div))]
+div <- div[, -grep(pattern='kgha', colnames(div))]
+div <- div[, -grep(pattern='TOT', colnames(div))]
+#div <- div[, -grep(pattern='Coloured', colnames(div))]
+div$Species <- as.factor(div$Species)
+
+## Remove Atherinomorus (silversides), because enormous swarms
+div <- div[!(div$Species=='Atherinomorus sp'),]
+
+# Net NAs to 0 
+div[is.na(div)] <- 0
+
+## Set column names (order of surveys won't match original Excel numbering anymore: start numbering at newer survey years)
+surveys.tot <- (ncol(div) - 1)/13
+colname <- c("Species", paste0(rep(c("1_", "2_", "3_", "4_", "5_", "6_", "7_", "8_", "9_", "10_", "11_", "12_", "Coloured_"), surveys.tot), rep(1:surveys.tot, each = 13)))
+colnames(div) <- colname
+
+## Go to long format
+div <- setDT(div)
+div <- melt(div, 
+            id.vars = 'Species', 
+            measure.vars = patterns('^1_', '^2_', '^3_', '^4_', '^5_', '^6_', '^7_', '^8_', '^9_', '^10_', '^11_', '^12_',
+                                    '^Coloured_'),
+            variable.name = 'SurveyNo', 
+            value.name = c('1.25', '3.75', '6.25', '8.75', '12.5', '17.5', '25', '35', '45', '75', '125', '175', 'Coloured'))
+
+## Duplicate data frame for Abundance and Biomass
+abp <- div
+abp$Coloured[abp$Coloured == 0] <- 12 # Set non-coloured value (12) for missing data
+
+## Remove colour codings (for non-instataneous data) from Diversity data frame
+div <- select(div, -c('Coloured'))
+
+# ---- META DATA ----
+## Meta data surveys
+### 2021
+SurveysData.2021 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2021-2022_2022-08.xlsm", sheet = "Data")) 
+SurveysData.2021 <- SurveysData.2021[!is.na(SurveysData.2021$Date),] # Remove empty rows
+
+### 2020
+SurveysData.2020 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2020_2022-08.xlsm", sheet = "Data")) 
+
+### 2019
+SurveysData.2019 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2019_2022-08.xlsm", sheet = "Data")) 
+
+### 2018
+SurveysData.2018 <- as.data.frame(read_excel("Raw data/Fish surveys_DATABASE_2017-2018_2022-08.xlsm", sheet = "Data")) 
+
+## Merge years
+SurveysData <- rbind(SurveysData.2021, SurveysData.2020, SurveysData.2019, SurveysData.2018)
+
+### Clean up
+SurveysData$SurveyNo <- as.factor(seq(1, surveys.tot, by = 1))
+SurveysData <- SurveysData[,-c(6:8,27:50)] # Remove unnecessary columns 
+
+### Set data types
+tofactors <- c('Location', 'Transect', 'Observer', 'Tide', 'Current', 'Weather', 'Type') 
+SurveysData[tofactors] <- lapply(SurveysData[tofactors], factor)
+
+## Treatment and Zone info per patch
+reeftype <- as.data.frame(read_excel("Raw data/SpeciesList_2022-08.xlsx", sheet = "ReefType"))
+
+### Cleanup
+tofactors <- c('Transect', 'ReefType', 'Zone')
+reeftype[tofactors] <- lapply(reeftype[tofactors], factor)
+
+## Meta data patches
+metadata <- as.data.frame(read_excel("Raw data/Metadata ARs_2022-08.xlsx", sheet= "Metadata"))
+metadata <- metadata[c(2:5,11)] # Select relevant columns
+metadata$Transect <- as.factor(metadata$Transect)
+
+# Merge all metadatas
+metadata <- merge(reeftype, metadata, by = "Transect")
+SurveysDataPlus <- merge(SurveysData, metadata, all.x = TRUE)
+
+## Cleanup
+SurveysDataPlus <- SurveysDataPlus[order(SurveysDataPlus$SurveyNo),]
+
+## Set study years
+SurveysDataPlus$Study <- lubridate::year(SurveysDataPlus$Date)
+SurveysDataPlus$Study[SurveysDataPlus$Study == 2022] <- 2021
+SurveysDataPlus$Study <- as.factor(SurveysDataPlus$Study)
+
+# For permutation test
+SurveysDataPlus$Interaction <- as.factor(paste(as.character(SurveysDataPlus$ReefType), as.character(SurveysDataPlus$Study))) 
+
+# Set hard substrate
+SurveysDataPlus$Hard.substrate_cor <- SurveysDataPlus$Hard.coral + SurveysDataPlus$Rock #one of the external factors
+SurveysDataPlus$Hard.substrate_cor[SurveysDataPlus$ReefType=='Positive'] <- NA #Hard substrate on reefs are not considered noise
+Hard_substrate_cor <- aggregate(Hard.substrate_cor ~ Transect, SurveysDataPlus[SurveysDataPlus$Study=='2021',], mean)
+metadata <- merge(metadata,Hard_substrate_cor, all.x=T)
+
+# Select surveys
+surveys.years <- SurveysDataPlus
+surveys <- subset(SurveysDataPlus, Study == "2020" | Study == "2021") # Select years
+surveys <- surveys[!is.na(surveys$ReefType),] #We only include the data from the experiment
+surveys <- subset(surveys, !grepl("wrong", surveys$Comments)) # Exclude survey done on the wrong location
+
+# Species information
+specieslist <- as.data.frame(read_excel("Raw data/SpeciesList_2022-08.xlsx", sheet = "SpeciesList"))
+specieslist$Species <- sub("\\.", "", specieslist$Species) # Remove points from species names
+tofactors <- c('Family', 'Species', 'Diet', 'Position')
+specieslist[tofactors] <- lapply(specieslist[tofactors], factor)
+
+```
+
+# Richness
+```{r richness}
+
+# ---- DATA PREP ----
+div$SpeciesAbundance <- rowSums(div[, 3:14]) # Sum abundance over all size categories
+div <- div[div$SpeciesAbundance != 0,] # Remove the rows with no abundance, so we keep one row per fish per survey
+
+# Make already a grouping, for Diversity analysis on Diet level
+divgrouping <- div
+divgrouping <- merge(divgrouping, specieslist, all.x=T)
+divDiet <- spread(divgrouping, key = Diet, value = SpeciesAbundance) # Make Diet section from long to wide
+divDiet <- divDiet[,-c(1,3:25)] #Remove unnecessary columns
+divDiet[is.na(divDiet)] <- 0 
+divDiet <- aggregate(. ~ SurveyNo, data = divDiet, FUN = sum) # Sum each Diet per Survey
+
+div <- spread(div, key = Species, value = SpeciesAbundance) # Create a dataframe where each individual gets a separate row
+div <- div[,-c(2:13)] #Remove unnecessary columns
+div[is.na(div)] <- 0 
+div <- aggregate(. ~ SurveyNo, data=div, FUN=sum) #Here we combine all species for each survey
+
+# ---- DIVERSITY INDICES ----
+## Shannon
+divsum <- as.data.frame(cbind(div$SurveyNo, diversity(div[,2:ncol(div)], index = 'shannon')))
+colnames(divsum) <- c('SurveyNo', "Shannon")
+
+## Richness
+divsum$S <- rowSums(div!=0) - 1 # The species richness per survey: amount of nonzero values for species (minus the column name)
+
+## Simpson
+divsum$Simpson <- diversity(div[,2:ncol(div)], index = 'simpson')
+
+## Pielou
+divsum$Pielou <- divsum$Shannon/log(divsum$S)
+
+# Merge with survey metadata 
+divsum1 <- merge(surveys, divsum, all.x=T)
+
+# Average surveys done simultaneously, and a dataframe in which we average all transect within a study
+divsumsubmeans <- aggregate(S ~ Transect + Date + Study + ReefType, divsum1, mean)
+divsumsubmeans <- merge(divsumsubmeans, metadata, all.x=T) # Add Patch metadata
+
+# Average over replicate Dates within each Study year
+divsumsubtransmeans <- aggregate(S ~ Transect + Study + ReefType, divsum1, mean)
+divsumsubtransmeans <- merge(divsumsubtransmeans, metadata, all.x=T) # Add Patch metadata
+
+# ---- MODELLING ----
+## Model
+lmerSmean <- lmer(S ~ ReefType*Study+ (1|Transect), data=divsumsubmeans)
+anova(lmerSmean) 
+
+## Model validation
+mod <- lmerSmean # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(divsumsubmeans$ReefType, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(divsumsubmeans$Study, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ divsumsubmeans$S) # response data vs fitted
+par(op)
+
+## Post hoc
+emmS <- emmeans(lmerSmean, specs = pairwise ~ ReefType|Study, adjust='tukey') 
+emmSstudy <- as.data.frame(emmeans(lmerSmean, list(pairwise ~ Study), adjust='tukey')$`emmeans of Study`) # Yearly average
+
+# ---- PLOTS ----
+
+# 2021 Only + means + CI
+emmSsum <- multcomp::cld(emmS$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+emmSsum <- emmSsum %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+ggplot(
+  data = divsumsubtransmeans[divsumsubtransmeans$Study=='2021',],
+  aes(x = ReefType, y = S,  colour=ReefType)) +
+    geom_jitter(width = 0.2) +
+    ylab(expression(paste("Species Richness (S)"))) +
+    xlab(expression(paste('Treatment')))+
+    
+  geom_point(data = emmSsum[emmSsum$Study=='2021',], aes(y = emmean), size = 2.5, colour='black') +
+  geom_errorbar(data = emmSsum[emmSsum$Study== '2021',], aes(y = emmean, ymin = emmean-SE, ymax = emmean + SE), width = 0.1, colour='black')+
+  geom_text(data=emmSsum[emmSsum$Study== '2021',], aes(label=.group, y=upper.CL+2), colour='black', size=5)+
+  geom_hline(yintercept=emmSstudy[1,2], colour='grey44', linetype=4)+
+  geom_hline(yintercept=emmSstudy[2,2], colour='grey44', linetype=4)+  
+  annotate("rect", xmin = -Inf, xmax = Inf , ymin = emmSstudy[1,6], ymax = emmSstudy[1,5],
+           fill = "grey44", alpha = .1, color = NA)+  
+  annotate("rect", xmin = -Inf, xmax = Inf , ymin = emmSstudy[2,6], ymax = emmSstudy[2,5],
+           fill = "grey44", alpha = .1, color = NA)+
+ theme_bw() + theme(legend.position = "none")
+
+
+# To study possible external effects we plot some possibly relevant parameters against species richness
+# The depth will be analysed with the interactive model, for the other parameters, we will only look at the data of the ARS from 2021/2022
+diveffectsAll <- divsumsubmeans[divsumsubmeans$Study=='2021',]
+diveffects <- diveffectsAll[diveffectsAll$ReefType!=c('Ref (-)'),]
+diveffects <- diveffects[diveffects$ReefType!=c('Ref (+)'),]
+
+# Including Depth lowers AIC for Interaction model (both Study years)
+AIC(lmer(S ~ Depth_Abs + ReefType * Study + (1|Transect), data=divsumsubmeans),lmer(S~ReefType*Study+(1|Transect), data=divsumsubmeans)) # The one including Absolute depth is lower.
+
+# Only Depth lowers AIC, other potential covariates collected in 2021 do not
+lmSall <- lmer(S ~ Depth_Abs +`AR CC`+ARdist+Zone+Hard.substrate_cor+Reefdist+ReefType+(1|Transect), data=diveffects)
+lmS  <-   lmer(S ~ ReefType + (1|Transect), data=diveffects)
+lmS0 <-   lmer(S ~ Depth_Abs + ReefType+(1|Transect), data=diveffects)
+lmS1 <-   lmer(S ~ Depth_Abs +`AR CC`+ReefType+(1|Transect), data=diveffects)
+lmS2 <-   lmer(S ~ Depth_Abs + ARdist+ReefType+(1|Transect), data=diveffects)
+lmS3 <-   lmer(S ~ Depth_Abs + Zone+ReefType+(1|Transect), data=diveffects)
+lmS4 <-   lmer(S ~ Depth_Abs + Hard.substrate_cor+ReefType+(1|Transect), data=diveffects)
+lmS5 <-   lmer(S ~ Depth_Abs + Reefdist+ReefType+(1|Transect), data=diveffects)
+
+AIC(lmS,lmS0, lmS1, lmS2, lmS3, lmS4, lmS5, lmSall) # Thus will go with lmS0
+
+# Best model is therefore one that includes depth
+lmerSmeancor <- lmer(S ~ Depth_Abs + ReefType*Study + (1|Transect), data = divsumsubmeans)
+
+# Main effects for Study and reeftype are significant, interaction is not
+anova(lmerSmeancor)
+summary(lmerSmeancor)
+lmerSmeancor.coef <- as.data.frame(summary(lmerSmeancor)$coefficients)
+
+## Post hoc
+### Treatment * Year + Compact Letter Display
+emmScor <- emmeans(lmerSmeancor, specs = pairwise ~ ReefType|Study, adjust = 'tukey', type = "response") 
+
+emmScorsum <- multcomp::cld(emmScor$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+emmScorsum <- emmScorsum %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+### Year averages
+emmScorstudy <- as.data.frame(emmeans(lmerSmeancor, list(pairwise ~ Study), adjust='tukey')$`emmeans of Study`) # Yearly average
+
+# ---- PLOTS ----
+
+## 2021 Only + means + CI
+### Observed data
+ggplot(
+  data = divsumsubtransmeans[divsumsubtransmeans$Study=='2021',],
+  aes(x = ReefType, y = S,  colour=ReefType)) +
+    geom_jitter(width = 0.2) +
+    ylab(expression(paste("Species Richness (S)"))) +
+    xlab(expression(paste('Treatment')))+
+  geom_point(data = emmScorsum[emmScorsum$Study=='2021',], aes(y = emmean), size = 2.5, colour='black') +
+  geom_errorbar(data = emmScorsum[emmScorsum$Study== '2021',], aes(y = emmean, ymin = emmean-SE, ymax = emmean + SE), width = 0.1, colour='black')+
+  geom_text(data=emmScorsum[emmScorsum$Study== '2021',], aes(label=.group, y=upper.CL+2), colour='black', size=5)+
+  geom_hline(yintercept=emmScorstudy[1,2], colour='grey44', linetype=4)+
+  geom_hline(yintercept=emmScorstudy[2,2], colour='grey44', linetype=4)+  
+  annotate("rect", xmin = -Inf, xmax = Inf , ymin = emmScorstudy[1,6], ymax = emmScorstudy[1,5],
+           fill = "grey44", alpha = .1, color = NA)+  
+  annotate("rect", xmin = -Inf, xmax = Inf , ymin = emmScorstudy[2,6], ymax = emmScorstudy[2,5],
+           fill = "grey44", alpha = .1, color = NA)+
+ theme_bw() + theme(legend.position = "none")
+
+### Depth-adjusted data
+#### Adjust raw data points for depth, based on EMMEANS
+lmerSmeancor.coef <- tibble::rownames_to_column(lmerSmeancor.coef, "Name")
+lmerSmeancor.coef.b_Depth <- lmerSmeancor.coef[lmerSmeancor.coef$Name == "Depth_Abs", "Estimate"]
+lmerSmeancor.coef.mean_Depth <- mean(as.data.frame(ref_grid(lmerSmeancor))$Depth_Abs)
+divsumsubmeans$S.adj <- divsumsubmeans$S + lmerSmeancor.coef.b_Depth * (lmerSmeancor.coef.mean_Depth - divsumsubmeans$Depth_Abs)
+  
+#### Get average per Patch
+a <- aggregate(S.adj ~ Transect + Study + ReefType, divsumsubmeans, mean)
+
+#### Add to data frame (NB: Unadjusted Richness averages don't make sense here)
+divsumsubtransmeans <- merge(divsumsubtransmeans, a, all.x=T)
+
+#### Richness plot - adjusted for depth (emmeans)
+Divplot <- ggplot(data = divsumsubtransmeans[divsumsubtransmeans$Study=='2021', ], aes(x = ReefType, y = S.adj))+
+    geom_jitter(width = 0.2, size = 2, color = '#999999')+
+    geom_point(data = emmScorsum[emmScorsum$Study=='2021',], aes(y = emmean), size = 4, colour='black')+
+    geom_errorbar(data = emmScorsum[emmScorsum$Study== '2021',], width = 0.1, colour='black', size=0.8,
+                  aes(y = emmean, ymin = emmean - SE, ymax = emmean + SE))+
+    geom_text(data=emmScorsum[emmScorsum$Study == '2021',], 
+              aes(label = .group, y = emmean + 2*SE), colour = 'black', size = 7)+
+    labs(y = "Fish species richness (S)", x = "Treatment")+
+    scale_y_continuous(breaks = c(10, 20, 30))+
+    theme_bw()+
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
+          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5))
+
+
+```
+
+# Biomass
+## Treatment comparisons
+```{r biomass treatment}
+
+# ---- DATA PREP ----
+abp1 <- abp[rowSums(abp[,3:14]) != 0, ] # Remove species not observed in a survey (retains 634/639 surveys)
+abp1 <- abp1[abp1$Coloured == 12, ] # Remove non-instantaneous data (colored Excel cells) (retains 627/639 surveys)
+abp1 <- select(abp1, -c("Coloured"))
+
+## Add info
+abp1 <- merge(abp1, surveys, all.x=T, by='SurveyNo')
+abp1 <- merge(abp1, specieslist, all.x=T, by='Species')
+
+## Data selection
+abp1 <- abp1[!is.na(abp1$Transect)] # Select 234 out of 627 surveys, instead of 235 out of 639
+
+## Get Size class from wide to long
+abp1 <- melt(abp1, id.vars = c('SurveyNo', 'Transect' ,'Family', 'Species',
+                               'Diet', 'a', 'b', 'MaxSizeTL', 'Position', 'sstmean', 'Area'), 
+             measure.vars = c('1.25', '3.75', '6.25', '8.75', '12.5', '17.5', '25', '35', '45', '75', '125', '175'),
+             variable.name = 'SizeClass', value.name = 'Abundance')
+
+## Cleanup
+abp1 <- abp1[abp1$Abundance != 0,] # Remove size classes not observed per species (to speed up R)
+abp1$Length <- as.numeric(paste(abp1$SizeClass)) # Set a numeric Length
+
+## Calculate the biomass using the length-weight formula W = a * L^b, multiply per abundance and standardize to kg/ha
+abp1$Biomass_ha <- ((((abp1$a * (abp1$Length ^ abp1$b)) * abp1$Abundance)/ abp1$Area)/1000)* 10000
+abp1$Survey <- as.numeric(paste(abp1$SurveyNo)) #Will be useful later when referring to a range of surveys
+
+## Make already a grouping, for Ordination analysis on Diet level
+biogrouping <- abp1
+biogrouping <- merge(biogrouping, specieslist, all.x=T)
+bioDiet <- spread(biogrouping, key = Diet, value = Biomass_ha) # Make Diet section from long to wide
+bioDiet <- bioDiet[,-c(1:7, 9:19)] #Remove unnecessary columns
+bioDiet[is.na(bioDiet)] <- 0 
+bioDiet <- aggregate(. ~ SurveyNo, data = bioDiet, FUN = sum) # Sum each Diet per Survey
+
+## Summarize per survey
+abpsub <- merge(abp1, surveys, all.x=T)
+abpsum <- aggregate(Biomass_ha ~ SurveyNo, abpsub, sum) # Get the total biomass per survey
+
+# Add Abundance (?)
+abpsum <- merge(abpsum, aggregate(Abundance ~ SurveyNo, abp1, sum))
+abpsum <- merge(surveys, abpsum, all.x=T) #Now the df contains all information, also surveys without obs
+
+## Set Abundance & Biomass 0 for survey without observations
+abpsum$Biomass_ha[is.na(abpsum$Biomass_ha)] <- 0
+abpsum$Abundance[is.na(abpsum$Abundance)] <- 0
+
+## Aggregate the simultaneous surveys and means for transects per study
+biosumsubmeans <- aggregate(Biomass_ha ~ Transect + Date + Study + ReefType, abpsum, mean) # Average simultaneous surveys
+biosumsubtransmeans <- aggregate(Biomass_ha ~ Transect + Study + ReefType, abpsum, mean) # Average per Patch
+
+## Add meta data
+biosumsubmeans <- merge(biosumsubmeans, metadata, all.x=T)
+biosumsubtransmeans <- merge(biosumsubtransmeans,metadata, all.x=T)
+
+
+
+# ---- MODELLING ----
+
+## Log-transformed because of heterogeneity residuals
+biosumsubmeans$Biomass_ha[biosumsubmeans$Biomass_ha == 0] <- min(biosumsubmeans$Biomass_ha[biosumsubmeans$Biomass_ha>0])/2
+
+## ==== Model 2020-2021 ====
+lmerBiomeans <- lmer(log10(Biomass_ha) ~ ReefType*Study + (1|Transect), data = biosumsubmeans)
+
+### Inclusion of Depth as covariate not helping that much (dif AIC < 3)
+AIC(lmer(log10(Biomass_ha)~ Depth_Abs + Study*ReefType+ (1|Transect), data=biosumsubmeans),
+    lmer(log10(Biomass_ha)~ Study*ReefType+ (1|Transect), data=biosumsubmeans))
+
+anova(lmerBiomeans)
+
+### Model validation
+mod <- lmerBiomeans # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(biosumsubmeans$ReefType, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(biosumsubmeans$Study, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ log10(biosumsubmeans$Biomass_ha)) # response data vs fitted
+par(op)
+
+### Post hoc
+emmBiomeans <- emmeans(lmerBiomeans, list(pairwise ~ ReefType|Study), adjust='tukey', type = "response") 
+
+emmBiostudy <- as.data.frame(emmeans(lmerBiomeans, list(pairwise ~ Study), adjust='tukey' , type = "response")$`emmeans of Study`)
+
+emmBiosum <- multcomp::cld(emmBiomeans$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+emmBiosum <- emmBiosum %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# Figs?
+
+# ==== Model 2021 only (allows for more covariates measured in 2021 only) ====
+
+## Create data frame
+bioeffects <- biosumsubmeans[biosumsubmeans$Study=='2021',]
+
+## Exclude references (covariates not relevant)
+bioeffects <- bioeffects[bioeffects$ReefType!=c('Ref (-)'),]
+bioeffects <- bioeffects[bioeffects$ReefType!=c('Ref (+)'),]
+
+## Compare various co-variate models
+
+lmBio <- lmer(log10(Biomass_ha) ~ ReefType+(1|Transect), data=bioeffects)
+lmBio0 <- lmer(log10(Biomass_ha) ~ Depth_Abs +ReefType+(1|Transect), data=bioeffects)
+lmBio1 <- lmer(log10(Biomass_ha) ~ `AR CC`+ReefType+(1|Transect), data=bioeffects)
+lmBio2 <- lmer(log10(Biomass_ha) ~ ARdist+ReefType+(1|Transect), data=bioeffects)
+lmBio3 <- lmer(log10(Biomass_ha) ~ Zone+ReefType+(1|Transect), data=bioeffects)
+lmBio4 <- lmer(log10(Biomass_ha) ~ Hard.substrate_cor+ReefType+(1|Transect), data=bioeffects)
+lmBio5 <- lmer(log10(Biomass_ha) ~ Reefdist+ReefType+(1|Transect), data=bioeffects)
+lmBioall <- lmer(log10(Biomass_ha)~`AR CC`+ARdist+Zone+Hard.substrate_cor+Reefdist+ReefType+(1|Transect), data=bioeffects)
+anova(lmBioall)
+
+AIC(lmBio,lmBio0, lmBio1, lmBio2, lmBio3, lmBio4, lmBio5, lmBioall) #Best model includes (only) AR coral cover (lmBio1)
+lmerBiomeanscor <- lmBio1 # Set final model
+
+anova(lmerBiomeanscor)
+summary(lmerBiomeanscor)
+
+## Validation
+mod <- lmerBiomeanscor # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(bioeffects$ReefType, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(bioeffects$Study, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ log10(bioeffects$Biomass_ha)) # response data vs fitted
+par(op)
+
+## Post hoc
+emmBiocor2 <- emmeans(lmerBiomeanscor, specs=pairwise ~ ReefType, adjust= 'tukey') #No differences between the AR reef types
+
+
+
+# Figs?
+
+# ==== Model 2021 only (no) ====
+
+Bioplot <- ggplot(data = biosumsubtransmeans[biosumsubtransmeans$Study == '2021', ], aes(x = ReefType, y = Biomass_ha))+
+    geom_jitter(width = 0.2, size = 2, color = '#999999')+
+    geom_point(data= emmBiosum[emmBiosum$Study=='2021', ], aes(y = response), colour = 'black', size = 4)+
+    geom_errorbar(data = emmBiosum[emmBiosum$Study== '2021',], width = 0.1, colour='black', size=0.8,
+                  aes(y = response, ymin = response - SE, ymax = response + SE))+
+    geom_text(data=emmBiosum[emmBiosum$Study == '2021',], 
+              aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
+    labs(y = expression(paste("Fish biomass kg ( ", ha^-1,")")), x = "Treatment")+
+    scale_y_continuous(trans = 'log10', breaks = c(10, 100, 1000))+
+    coord_cartesian(ylim = c(4, 1001))+
+    scale_color_manual(values=co)+
+    theme_bw()+
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
+          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5))
+
+```
+
+## Composition comparisons
+```{r biomass composition}
+
+# ---- DATA PREP ----
+## ==== Species ====
+### Create data frame
+abp.ord <- spread(abp1, key = Species, value = Biomass_ha) # Wide to long
+abp.ord[is.na(abp.ord)] <- 0
+abp.ord <- aggregate(. ~ SurveyNo, data = abp.ord, FUN = sum, na.action = na.omit) # Sum each Species per Survey
+
+### Add info and re-add surveys without observations
+abp.ord <- left_join(surveys, abp.ord, by = "SurveyNo")
+
+### Data selection
+abp.ord <- select(abp.ord, -c(2:4, 6:23, 26:30, 32:46))
+abp.ord[is.na(abp.ord)] <- 0 # Set all Species to 0 for surveys without observations
+abp.ord <- subset(abp.ord, Study == 2021 & Observer == "Jelle Rienstra")
+
+### average over replicate surveys
+abp.ord <- aggregate(.~Transect.x+ReefType+Study, abp.ord, mean)
+
+## ==== Diet ====
+### Create data frame
+bioBrayDiet <- merge(surveys, bioDiet, all.x=T)
+
+### Data selection
+bioBrayDiet <- subset(bioBrayDiet, Study == 2021 & Observer == "Jelle Rienstra")
+subbcDiet.bio <- select(bioBrayDiet, -c(1, 3:24, 26:30, 32:33))
+
+### Average over replicate surveys
+subbcDiet.bio <- aggregate(.~Transect+ReefType+Study, subbcDiet.bio, mean)
+
+# ---- STATS ----
+## ==== Species ====
+### Create a bc mean distance table 
+BCtable.Bio.Specs <- vegdist(abp.ord[,6:ncol(abp.ord)], "bray")
+meandist(BCtable.Bio.Specs, abp.ord$ReefType, cluster=average) 
+
+# Stats
+adonis.Bio.Specs <- adonis2(formula = BCtable.Bio.Specs ~ ReefType, data = abp.ord, permutations = 9999)
+pairadonis.Bio.Specs <- pairwise.adonis(BCtable.Bio.Specs, abp.ord$ReefType, p.adjust='bonferroni', perm = 37000)
+
+### NMDS
+NMDS.Bio.Spec <- metaMDS(abp.ord[,6:ncol(abp.ord)], distance = "bray", k = 2, trymax=1000, autotransform = FALSE) 
+
+## ==== Diet ====
+### Create a bc mean distance table 
+BCtable.Bio.Diet <- vegdist(subbcDiet.bio[,4:ncol(subbcDiet.bio)], "bray")
+meandist(BCtable.Bio.Diet, subbcDiet.bio$ReefType, cluster=average) 
+
+### Stats
+adonis.Bio.Diet <- adonis2(formula = BCtable.Bio.Diet ~ ReefType, data = subbcDiet.bio, permutations = 9999)
+pairadonis.Bio.Diet <- pairwise.adonis(BCtable.Bio.Diet, subbcDiet.bio$ReefType, p.adjust = 'bonferroni', perm = 37000)
+
+### NMDS
+NMDS.Bio.Diet <- metaMDS(subbcDiet.bio[,4:ncol(subbcDiet.bio)], distance = "bray", k = 2, trymax=1000, autotransform = FALSE) 
+
+# ---- Plots ----
+## ==== Species ====
+### On Patch level
+NMDS.Bio.Spec.Patch <- as.data.frame(scores(NMDS.Bio.Spec, display="site"))
+NMDS.Bio.Spec.Patch$Treatment <- subbcDiet.bio$ReefType
+NMDS.Bio.Spec.Patch$Interaction <- subbcDiet.bio$Interaction
+
+ggplot(data = NMDS.Bio.Spec.Patch)+
+    stat_ellipse(geom = "polygon", alpha = 0.1, aes(x = NMDS1, y = NMDS2, fill = Treatment),
+                level = 0.5, size = 10)+
+    scale_fill_manual(values=co)+
+    geom_point(aes(x = NMDS1,y = NMDS2, colour = Treatment), size= 2)+
+    scale_color_manual(values=co)+
+    scale_y_continuous(limits = c(-2, 2))+
+    theme_bw()+
+    theme(legend.position = "right",
+          legend.text = element_text(size = 12),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
+          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5))
+ggsave("Fish_Ordination species_Patch_Biomass.tiff", width = 18, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+### On Species level
+
+#### Adjust font size based on % of surveys in which a species is seen
+specsizes.bio <- abp.ord[,6:ncol(abp.ord)]
+specsizes.bio <- colSums(specsizes.bio)
+specsizes.bio.min <- min(specsizes.bio)
+specsizes.bio.max <- max(specsizes.bio)
+cex.bio.min <- 0.02
+cex.bio.max <- 2
+specsizes.bio <- ((specsizes.bio - specsizes.bio.min)/(specsizes.bio.max-specsizes.bio.min)) * (cex.bio.max - cex.bio.min) + cex.bio.min
+
+#### Plot on Species level
+tiff("Fish_Ordination species_Species_Biomass.tiff", width = 18, height = 14, units = "cm", res = 1200, compression = "lzw")
+ordiplot(NMDS.Bio.Spec, type="none",  cex = 0.3, ylim = c(-1, 1), xlim = c(-1.9, 2.05))
+ordiellipse(NMDS.Bio.Spec, groups = abp.ord$ReefType, kind = "sd", draw  ="polygon", 
+            col = co, alpha = 50, label = F, lty = 'blank', border = "white")
+ordipointlabel(NMDS.Bio.Spec, display = "species", scaling = 9, add = TRUE, cex = specsizes.bio)
+dev.off()
+
+## ==== Diet ====
+### On Patch level
+NMDS.Bio.Diet.Patch <- as.data.frame(scores(NMDS.Bio.Diet, display="site"))
+NMDS.Bio.Diet.Patch$Treatment <- subbcDiet.bio$ReefType
+
+ggplot(data = NMDS.Bio.Diet.Patch)+
+    stat_ellipse(geom = "polygon", alpha = 0.1, aes(x = NMDS1, y = NMDS2, fill = Treatment),
+                level = 0.5, size = 10)+
+    scale_fill_manual(values=co)+
+    geom_point(aes(x = NMDS1,y = NMDS2, colour = Treatment), size= 2)+
+    scale_color_manual(values=co)+
+    scale_y_continuous(limits = c(-1, 1))+
+    scale_x_continuous(limits = c(-2, 2))+
+    theme_bw()+
+    theme(legend.position = "right",
+          legend.text = element_text(size = 12),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
+          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5))
+ggsave("Fish_Ordination diet_Patch_Biomass.tiff", width = 18, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+```
+
+
+# Abundance
+## Treatment comparisons
+```{r abundance treatment}
+
+# ==== Model 2020-2021 ====
+
+## Prep data
+abpsum$Abundance_m2 <- abpsum$Abundance / abpsum$Area 
+abusumsubmeans <- aggregate(Abundance_m2 ~ Transect + Date + Study + ReefType, abpsum, mean) # Mean simultaneous surveys
+abusumsubtransmeans <- aggregate(Abundance_m2 ~ Transect + Study + ReefType, abpsum, mean) # Mean per Patch
+
+## Add meta
+abusumsubmeans <- merge(abusumsubmeans, metadata, all.x=T)
+abusumsubtransmeans <- merge(abusumsubtransmeans, metadata, all.x=T)
+
+## Modelling
+
+### Log-transformed because of heterogeneity residuals
+abusumsubmeans$Abundance_m2[abusumsubmeans$Abundance_m2 == 0] <- min(abusumsubmeans$Abundance_m2[abusumsubmeans$Abundance_m2>0])/2
+
+lmerAbumeans <- lmer(log10(Abundance_m2) ~ ReefType*Study + (1|Transect), data = abusumsubmeans)
+
+### Depth as coviarate doesn't improve model
+AIC(lmer(log10(Abundance_m2)~ Depth_Abs + Study*ReefType+ (1|Transect), data=abusumsubmeans),
+    lmer(log10(Abundance_m2)~ Study*ReefType+ (1|Transect), data=abusumsubmeans))
+
+### Results
+anova(lmerAbumeans)
+
+### Validation
+mod <- lmerAbumeans # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(abusumsubmeans$ReefType, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(abusumsubmeans$Study, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ log10(abusumsubmeans$Abundance_m2)) # response data vs fitted
+par(op)
+
+### Post hoc
+emmAbu <- emmeans(lmerAbumeans, list(pairwise ~ Study|ReefType), adjust='tukey', type = "response")
+emmAbu2 <- emmeans(lmerAbumeans, list(pairwise ~ ReefType|Study), adjust='tukey', type = "response")
+
+emmAbusum <- multcomp::cld(emmAbu2$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+emmAbusum <- emmAbusum %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+# ==== Model 2021 only (allows for more covariates measured in 2021 only) ====
+
+## Data prep
+abueffects <- abusumsubmeans[abusumsubmeans$Study=='2021',]
+
+## Exclude references (covariates not relevant)
+abueffects <- abueffects[abueffects$ReefType!=c('Ref (-)'),]
+abueffects <- abueffects[abueffects$ReefType!=c('Ref (+)'),]
+
+## Compare various covariates
+lmAbu  <- lmer(log10(Abundance_m2) ~ ReefType+(1|Transect), data=abueffects)
+lmAbu0 <- lmer(log10(Abundance_m2) ~ Depth_Abs +ReefType+(1|Transect), data=abueffects)
+lmAbu1 <- lmer(log10(Abundance_m2) ~ `AR CC` + ReefType + (1|Transect), data=abueffects)
+lmAbu2 <- lmer(log10(Abundance_m2) ~ ARdist+ReefType+(1|Transect), data=abueffects)
+lmAbu3 <- lmer(log10(Abundance_m2) ~ Zone+ReefType+(1|Transect), data=abueffects)
+lmAbu4 <- lmer(log10(Abundance_m2) ~ Hard.substrate_cor+ReefType+(1|Transect), data=abueffects)
+lmAbu5 <- lmer(log10(Abundance_m2) ~ Reefdist+ReefType+(1|Transect), data=abueffects)
+lmAbuall <- lmer(log10(Abundance_m2)~`AR CC`+ARdist+Zone+Hard.substrate_cor+Reefdist+ReefType+(1|Transect), data=abueffects)
+anova(lmAbuall)
+
+AIC(lmAbu,lmAbu0, lmAbu1, lmAbu2, lmAbu3, lmAbu4, lmAbu5, lmAbuall) #Best model (by far) includes (only) AR coral cover
+
+lmerAbumeanscor <- lmAbu1 # Set as final model
+
+## Results
+anova(lmerAbumeanscor)
+summary(lmerAbumeanscor)
+
+## Validation
+mod <- lmerAbumeanscor # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(abueffects$ReefType, resid(mod, type = "pearson")) # residuals split over Date
+abline(0,0)
+plot(abueffects$Study, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ log10(abueffects$Abundance_m2)) # response data vs fitted
+par(op)
+
+## Post hoc
+emmAbucor <- emmeans(lmerAbumeanscor, specs = pairwise ~ ReefType, adjust='tukey')
+
+# ==== Model 2021 only (no covariates) ====
+
+## Plots
+Abuplot <- ggplot(data = abusumsubtransmeans[abusumsubtransmeans$Study == '2021', ], aes(x = ReefType, y = Abundance_m2))+ 
+    geom_jitter(width = 0.2, size = 2, color = '#999999')+
+    geom_point(data= emmAbusum[emmAbusum$Study=='2021', ], aes(y = response), colour = 'black', size = 4)+
+    geom_errorbar(data = emmAbusum[emmAbusum$Study== '2021',], width = 0.1, colour='black', size=0.8,
+                  aes(y = response, ymin = response - SE, ymax = response + SE))+
+    geom_text(data=emmAbusum[emmAbusum$Study == '2021',], 
+              aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
+    labs(y = expression(paste("Fish abundance ( ", m^-2,")")), x = "Treatment")+
+    scale_y_continuous(trans = 'log10', breaks = c(0.1, 1, 10))+
+    coord_cartesian(ylim = c(0.05, 11))+
+    scale_color_manual(values=co)+
+    theme_bw()+
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
+          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5))
+
+# ==== Model 2020 only (no covariates) ====
+
+# ==== Model 2020 only (no covariates) ====
+
+
+
+```
+
+## Composition comparisons: output not used: output based on Biomass more informative
+```{r abundance composition}
+
+# ---- DATA PREP ----
+## ==== Species ====
+### Create data frame
+abu.ord <- spread(abp1, key = Species, value = Abundance) # Wide to long
+abu.ord[is.na(abu.ord)] <- 0
+abu.ord <- aggregate(. ~ SurveyNo, data = abu.ord, FUN = sum) # Sum each Species per Survey
+
+### Add info and re-add surveys without observations
+abu.ord <- left_join(surveys, abu.ord, by = "SurveyNo")
+
+### Data selection
+abu.ord <- select(abu.ord, -c(2:4, 6:23, 26:30, 32:46))
+abu.ord[is.na(abu.ord)] <- 0 # Set all Species to 0 for surveys without observations
+abu.ord <- subset(abu.ord, Study == 2021 & Observer == "Jelle Rienstra")
+
+### Average over replicate surveys
+abu.ord <- aggregate(.~Transect.x+ReefType+Study, abu.ord, mean)
+
+## ==== Diet ====
+### Create data frame
+divBrayDiet <- merge(surveys, divDiet, all.x=T)
+
+### Data selection
+divBrayDiet <- subset(divBrayDiet, Study == 2021 & Observer == "Jelle Rienstra")
+subbcDiet <- select(divBrayDiet, -c(1, 3:24, 26:30, 32:33))
+
+### Average over replicate surveys
+subbcDiet <- aggregate(.~Transect+ReefType+Study, subbcDiet, mean)
+
+# ---- STATS ----
+## ==== Species ====
+### Create a bc mean distance table 
+BCtable.Abu.Specs <- vegdist(abu.ord[,6:ncol(abu.ord)], "bray")
+meandist(BCtable.Abu.Specs, abu.ord$ReefType, cluster=average) 
+
+### Stats
+adonis.Abu.Specs <- adonis2(formula = BCtable.Abu.Specs ~ ReefType, data=abu.ord, permutations = 9999)
+pairadonis.Abu.Specs <- pairwise.adonis(BCtable.Abu.Specs, abu.ord$ReefType, p.adjust='bonferroni', perm = 37000)
+
+### NMDS
+Abu_NMDSFinal <- metaMDS(abu.ord[,6:ncol(abu.ord)], distance = "bray", k = 2, trymax =1000, autotransform = FALSE) 
+
+## ==== Diet ====
+### Create a bc mean distance table 
+BCtable.Abu.Diet <- vegdist(subbcDiet[,4:ncol(subbcDiet)], "bray")
+meandist(BCtable.Abu.Diet, subbcDiet$ReefType, cluster=average) 
+
+### Stats
+adonis.Abu.Diet <- adonis2(formula = BCtable.Abu.Diet ~ ReefType, data = subbcDiet, permutations = 9999)
+pairadonis.Abu.Diet <- pairwise.adonis(BCtable.Abu.Diet, subbcDiet$ReefType, p.adjust = 'bonferroni', perm = 37000)
+
+### NMDS
+NMDS.Abu.Diet <- metaMDS(subbcDiet[,4:ncol(subbcDiet)], distance = "bray", k = 2, trymax =1000, autotransform = FALSE) 
+
+# ---- Plots ----
+## ==== Species ====
+### On Patch level
+tiff("Fish_Ordination species_Patch_Abundance.tiff", width = 18, height = 24, units = "cm", res = 1200, compression = "lzw")
+ordiplot(Abu_NMDSFinal, type="none")
+orditorp(Abu_NMDSFinal, display = "sites", cex = 0.3, air = 0.01, label = abu.ord$Transect)
+ordiellipse(Abu_NMDSFinal, groups = abu.ord$ReefType, kind = "sd", draw  ="polygon", 
+            col = co, alpha = 50, label = T, lty = 'blank', border = "white")
+dev.off()
+
+### On Species level
+
+#### Adjust font size based on % of surveys in which a species is seen
+specsizes.abu <- abu.ord[,6:ncol(abu.ord)]
+specsizes.abu <- colSums(specsizes.abu)
+specsizes.abu.min <- min(specsizes.abu)
+specsizes.abu.max <- max(specsizes.abu)
+cex.abu.min <- 0.1
+cex.abu.max <- 1
+specsizes.abu <- ((specsizes.abu - specsizes.abu.min)/(specsizes.abu.max-specsizes.abu.min)) * (cex.abu.max - cex.abu.min) + cex.abu.min
+
+#### Plot on Species level
+#tiff("Fish_Ordination species_Species_Abundance.tiff", width = 18, height = 14, units = "cm", res = 1200, compression = "lzw")
+ordiplot(Abu_NMDSFinal, type="none",  cex = 0.3)
+ordiellipse(Abu_NMDSFinal, groups = abu.ord$ReefType, kind = "sd", draw  ="polygon", 
+            col = co, alpha = 50, label = F, lty = 'blank', border = "white")
+ordipointlabel(Abu_NMDSFinal, display = "species", scaling = 9, add = TRUE, cex = specsizes.abu)
+#dev.off()
+
+## ==== Diet ====
+### On Patch level
+#tiff("Fish_Ordination diet_Patch_Abundance.tiff", width = 18, height = 24, units = "cm", res = 1200, compression = "lzw")
+ordiplot(NMDS.Abu.Diet, type="none")
+orditorp(NMDS.Abu.Diet, display = "sites", cex = 0.3, air = 0.01, label = subbcDiet$Transect)
+ordiellipse(NMDS.Abu.Diet, groups = subbcDiet$ReefType, kind = "sd", draw  ="polygon", 
+            col = co, alpha = 50, label = T, lty = 'blank', border = "white")
+#dev.off()
+
+
+```
+
+
+```{r}
+
+
+
+RAB <- plot_grid(Divplot, Abuplot, Bioplot, nrow = 3, align = "v")
+ggsave("Fish_Richness and Abundance and Biomass for 2020-2021.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw", RAB)
+
+
+
+
+```
+
