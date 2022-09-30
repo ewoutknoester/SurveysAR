@@ -1,0 +1,138 @@
+---
+title: "Fish"
+author: "Ewout Knoester"
+date: "23/08/2022"
+output: html_document
+---
+
+# Setup
+```{r setup}
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+options(scipen = 99) # Have all numbers in non-scientific notation
+
+library(readxl) # Join data frames (vlookup)
+library(cowplot) # Combine plots
+library(data.table)
+library(ggthemes) # pretty plots
+library(flextable) # Layout word table
+library(tidyverse) # Beta regression
+library(vegan) # Export Excel
+library(gridExtra)
+library(emmeans) # Select text from string
+library(lmerTest) # GLS
+library(officer) # Move table into word
+library(gridGraphics) # Combine base and ggplots
+library(car) # glm model validation
+library(viridis) # Convert data from wide to long
+library(pairwiseAdonis)
+library(writexl) # Export Excel
+
+# Function to facilitate averaging data frame
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      sd = sd(x[[col]], na.rm=TRUE),
+      sum  = sum(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+# Set colours for Treatments
+co <- c("#B0E54D", "#6FDCD9", "#F0C862", "#EC86BF","#D04E08", "#0673B0") # Colour palette
+
+```
+
+### Composition comparisons
+<!--
+Composition comparisons done on Biomass level, because more informative than on Abundance level
+-->
+```{r biomass composition}
+
+
+# Load data sets
+bio <- as.data.frame(read_excel("fishtest.xlsx"))
+
+# Set data types
+bio$ReefType <- as.factor(bio$ReefType)
+
+
+# ---- STATS ----
+## ==== Species ====
+### #### 2021 ####
+#### Create a bc mean distance table 
+BCtable.Bio.Specs <- vegdist(bio[,2:ncol(bio)], "bray")
+BCtable.Bio.Specs.tab <- as.data.frame(meandist(BCtable.Bio.Specs, bio$ReefType, cluster=average))
+
+#### Stats
+adonis.Bio.Specs <- adonis2(formula = BCtable.Bio.Specs ~ ReefType, data = bio, permutations = 9999)
+pairadonis.Bio.Specs <- pairwise.adonis(BCtable.Bio.Specs, bio$ReefType, p.adjust='bonferroni', perm = 37000)
+
+#### NMDS
+NMDS.Bio.Spec <- metaMDS(bio[,2:ncol(bio)], distance = "bray", k = 2, trymax=99, autotransform = FALSE) 
+
+# ---- PLOTS ----
+
+## ==== Species ====
+#### 2021 ####
+##### On Patch level
+NMDS.Bio.Spec.Patch <- as.data.frame(scores(NMDS.Bio.Spec, display="site"))
+NMDS.Bio.Spec.Patch$ReefType <- bio$ReefType
+
+ggplot(data = NMDS.Bio.Spec.Patch)+
+    stat_ellipse(geom = "polygon", alpha = 0.1, aes(x = NMDS1, y = NMDS2, fill = ReefType),
+                level = 0.5, size = 12)+
+    scale_fill_manual(values=co)+
+    geom_point(aes(x = NMDS1,y = NMDS2, colour = ReefType), size= 2)+
+    scale_color_manual(values=co)+
+    scale_y_continuous(limits = c(-2, 2), breaks = c(-2, 0, 2))+
+    theme_bw()+
+    theme(legend.text = element_text(size = 12),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+          axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
+          axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          plot.margin = margin(0, 0, 0.2, 0.5, "cm"),
+          axis.ticks.length.x = unit(0, "cm"))
+
+
+#### On Species level
+##### Adjust font size based on % of surveys in which a species is seen
+specsizes.bio <- bio[,2:ncol(bio)]
+specsizes.bio <- colSums(specsizes.bio)
+specsizes.bio.min <- min(specsizes.bio)
+specsizes.bio.max <- max(specsizes.bio)
+cex.bio.min <- 0.5
+cex.bio.max <- 1
+specsizes.bio <- ((specsizes.bio - specsizes.bio.min)/(specsizes.bio.max-specsizes.bio.min)) * (cex.bio.max - cex.bio.min) + cex.bio.min
+
+##### Plot on Species level
+##### For composite
+cox <- c(co, "#0673B0", "#0673B0", "#0673B0") # Strangely: original colour palette wasn't working here
+
+pdf(NULL)
+dev.control(displaylist="enable")
+par(bg = 'white', mar=c(0.35, 3.4, 0, 0), xaxt='n', las=1, tck=-0.007, cex.axis=1.1, cex.lab = 1.1, font.axis = 2,
+    col.axis = "#464646", lab = c(2,2,2), mgp = c(2,0.5,0))
+ordiplot(NMDS.Bio.Spec, type="none",  cex = 0.3, ylim = c(-1.1, 1.1), xlim = c(-0.5, 0.5))
+ordiellipse(NMDS.Bio.Spec, groups = bio$ReefType, kind = "se", conf = 0.99, draw  ="polygon", 
+            col = cox, alpha = 50, label = F, lty = 'blank', border = "white")
+ordipointlabel(NMDS.Bio.Spec, display = "species", scaling = "symmetric", add = TRUE,
+               cex = specsizes.bio, font = 3)
+Ordi.Sp.Sp <- recordPlot()
+invisible(dev.off())
+Ordi.Sp.Sp
+
+```
+
+
+
+

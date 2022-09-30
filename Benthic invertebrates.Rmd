@@ -6,8 +6,6 @@ output: html_document
 code_folding: hide
 ---
 
-#TODO: Layout of graphs
-
 ```{r setup, include=FALSE}
 
 rm(list=ls()) # Clear workspace
@@ -18,6 +16,7 @@ library(car) # ANOVA results
 library(data.table) # Data table
 library(emmeans) # Pairwise comparisons
 library(ggthemes) # pretty plots
+library(ggpubr) # ggarrange
 library(NCmisc) # Check packages used
 library(nlme) # GLS
 library(panelr) # wide to long
@@ -367,15 +366,17 @@ df3.BI.gastro.tot.spec <- data_summary(df3.BI.gastro.tot.spec, varname = "sum", 
 df3.BI.gastro.tot.spec <- select (df3.BI.gastro.tot.spec, -c(2, 4))
 colnames(df3.BI.gastro.tot.spec)[which(names(df3.BI.gastro.tot.spec) == "sum")] <- "Density.ha.tot"
 df3.BI.gastro.tot.spec$Density.pct <- df3.BI.gastro.tot.spec$Density.ha.tot / sum(df3.BI.gastro.tot.spec$Density.ha.tot) * 100 
-df3.BI.gastro.tot.spec$Genus.o <- ifelse(df3.BI.gastro.tot.spec$Density.pct > 1, df3.BI.gastro.tot.spec$Genus, "Other")
+df3.BI.gastro.tot.spec$Genus.o <- ifelse(df3.BI.gastro.tot.spec$Density.pct > 2, df3.BI.gastro.tot.spec$Genus, "Other")
 df3.BI.gastro.tot.spec <- select (df3.BI.gastro.tot.spec, -c(2:4))
 df3.BI.gastro <- left_join(df3.BI.gastro, df3.BI.gastro.tot.spec, by = "Genus")
+df3.BI.gastro.tot.spec$Genus.o <- factor(df3.BI.gastro.tot.spec$Genus.o,  levels=c("Conidae", "Cypraeidae", "Muricidae", "Strombidae", "Turbinellidae", "Other"))
 
 ### Per species
 df3.BI.gastro.spec <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
 df3.BI.gastro.spec <- data_summary(df3.BI.gastro.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
 df3.BI.gastro.spec <- select (df3.BI.gastro.spec, -c(4, 6, 7, 8))
 colnames(df3.BI.gastro.spec)[which(names(df3.BI.gastro.spec) == "sum")] <- "Density.ha"
+
 
 ### Merge
 df3.BI.gastro.tot <- select (df3.BI.gastro.tot, -c("Group"))
@@ -421,6 +422,7 @@ df3.BI.cucum.tot.spec$Density.pct <- df3.BI.cucum.tot.spec$Density.ha.tot / sum(
 df3.BI.cucum.tot.spec$Genus.o <- ifelse(df3.BI.cucum.tot.spec$Density.pct > 1, df3.BI.cucum.tot.spec$Genus, "Other")
 df3.BI.cucum.tot.spec <- select (df3.BI.cucum.tot.spec, -c(2:4))
 df3.BI.cucum <- left_join(df3.BI.cucum, df3.BI.cucum.tot.spec, by = "Genus")
+df3.BI.cucum$Genus.o <- factor(df3.BI.cucum$Genus.o,  levels=c("Holothuria", "Pearsonothuria", "Synapta", "Other"))
 
 ### Per species
 df3.BI.cucum.spec <- data_summary(df3.BI.cucum, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
@@ -775,7 +777,7 @@ df3.BI.snail.fig <- left_join(df3.BI.snail.spec, sigletters.snail, by = 'Treatme
 df3.BI.snail.fig$siglet <- ifelse(df3.BI.snail.fig$Species  == 'Drupella', df3.BI.snail.fig$.group, "")
 
 ## Corallivorous snails by genus
-ggplot(df3.BI.snail.fig) +  
+snailplot <- ggplot(df3.BI.snail.fig) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = forcats::fct_rev(Species)))+
   geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)), width=.2, size = 1,
                 position=position_dodge(.9))+
@@ -783,28 +785,28 @@ ggplot(df3.BI.snail.fig) +
             vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
   geom_bar(data=df3.BI.snail.fig[(df3.BI.snail.fig$Species=="Drupella"),],
            stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Species), alpha=0, size=1, color="black")+
-  scale_fill_manual(values = c( "#999999", "#323232"))+
+  scale_fill_manual(values = c( "#CCCCCC", "#666666"))+
   theme_economist()+scale_colour_economist()+
-  labs(y = expression(paste("Corallivorous snails ( ", m^-2,")")), x = "Treatment", fill = "Genus")+
+  labs(y = expression(paste("Corallivore snails ( ", m^-2,")")), x = "Treatment", fill = "Genus")+
   guides(fill=guide_legend(title="Genus"))+
   scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.95))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 2.1), breaks = c(0, 1, 2))+
   theme(
     panel.margin.y = unit(0, "cm"),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Benthic invertebrates_2022_Corallivorous snails.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic invertebrates_2022_Corallivorous snails.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- SEA URCHINS ----
 ## Post hoc letters
@@ -817,7 +819,7 @@ df3.BI.urchin.fig <- left_join(df3.BI.urchins.spec, sigletters.urchin, by = 'Tre
 df3.BI.urchin.fig$siglet <- ifelse(df3.BI.urchin.fig$Genus.o  == 'Echinostrephus', df3.BI.urchin.fig$.group, "")
 
 # Urchins by genus
-ggplot(df3.BI.urchin.fig) +  
+urchinplot <- ggplot(df3.BI.urchin.fig) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.m2, fill = Genus.o))+
   geom_errorbar(aes(x = Treatment, ymin=Density.m2.tot, ymax=Density.m2.tot+(1*se)),
                 width=.2, size = 1, position=position_dodge(.9))+
@@ -825,60 +827,60 @@ ggplot(df3.BI.urchin.fig) +
             vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
   geom_bar(data=df3.BI.urchin.fig[(df3.BI.urchin.fig$Genus.o=="Echinostrephus"),],
            stat = "identity", aes(x = Treatment, y = Density.m2.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  scale_fill_manual(values = c("#CCCCCC", "#999999", "#666666", "#FFFFFF"))+
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Sea urchins ( ", m^-2,")")), x = "Treatment", fill = "Genus")+
   guides(fill=guide_legend(title="Genus"))+
   scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.5))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1.6), breaks = c (0, 0.75, 1.5))+
   theme(
     panel.margin.y = unit(0, "cm"),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Benthic invertebrates_2022_Urchins.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic invertebrates_2022_Urchins.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- GASTROPODS ----
 
 ## Gastropods by family
-ggplot(df3.BI.gastro.spec) +  
+gastroplot <- ggplot(df3.BI.gastro.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
   geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
                 width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.gastro.spec[(df3.BI.gastro.spec$Genus.o=="Cypraeidae"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  scale_fill_manual(values = c("#C0C0C0", "#999999", "#666666", "#333333", "#000000", "#FFFFFF"))+
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Gastropods ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
-  guides(fill=guide_legend(title="Genus"))+
+  guides(fill=guide_legend(title="Family"))+
   scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
-  scale_y_continuous(expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 299))+
   theme(
     panel.margin.y = unit(0, "cm"),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
-    legend.text = element_text(size = 11, face = "italic"),
+    legend.text = element_text(size = 11),
     axis.title.x = element_text(size = 14, vjust = -2),
     axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Benthic invertebrates_2022_Gastropods.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic invertebrates_2022_Gastropods.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- OCTOPUS ----
 ggplot(df3.BI.octo.fig, aes(x = Treatment, y = Density.ha))+
@@ -892,9 +894,9 @@ ggplot(df3.BI.octo.fig, aes(x = Treatment, y = Density.ha))+
     panel.margin.y = unit(0, "cm"),
     strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
     strip.background = element_blank(),
-    axis.title.x = element_text(color="black", vjust=-2, size = 14),
-    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
-    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text(color="black" , vjust=4, size = 12),
     axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
     plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
     panel.background = element_rect(fill = "#FCFCFC"),
@@ -906,66 +908,75 @@ ggplot(df3.BI.octo.fig, aes(x = Treatment, y = Density.ha))+
 
 # ---- SEA CUCUMBERS
 ## Sea cucumbers by genus
-ggplot(df3.BI.cucum.spec) +  
+cumplot <- ggplot(df3.BI.cucum.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
   geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
                 width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.cucum.spec[(df3.BI.cucum.spec$Genus.o=="Holothuria"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  scale_fill_manual(values = c("#CCCCCC", "#666666", "#000000", "#FFFFFF"))+
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Sea cucumbers ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
   guides(fill=guide_legend(title="Genus"))+
   scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
-  scale_y_continuous(expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0), breaks = c(0, 30, 60), limits = c(0, 75))+
   theme(
     panel.margin.y = unit(0, "cm"),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Benthic invertebrates_2022_Sea cucumbers.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic invertebrates_2022_Sea cucumbers.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- SEA STARS
 ## Sea stars by genus
-ggplot(df3.BI.star.spec) +  
+starplot <- ggplot(df3.BI.star.spec) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Density.ha, fill = Genus.o))+
   geom_errorbar(aes(x = Treatment, ymin=Density.ha.tot, ymax=Density.ha.tot+(1*se)),
                 width=.2, size = 1, position=position_dodge(.9))+
   geom_bar(data=df3.BI.star.spec[(df3.BI.star.spec$Genus.o=="Linckia"),],
            stat = "identity", aes(x = Treatment, y = Density.ha.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  #scale_fill_manual(values = c("#C0C0C0", "#696969", "#778899", "#2F4F4F"))+
+  scale_fill_manual(values = c("#CCCCCC", "#999999", "#666666", "#333333", "#FFFFFF"))+
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Sea stars ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
   guides(fill=guide_legend(title="Genus"))+
   scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
-  scale_y_continuous(expand = c(0, 0))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 149))+
   theme(
     panel.margin.y = unit(0, "cm"),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Benthic invertebrates_2022_Stars.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic invertebrates_2022_Stars.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
-````
+```
 
+# Figure compilation
+```{r compilation}
+
+INVERTS <- ggarrange(snailplot, urchinplot, starplot, cumplot, gastroplot, nrow = 5, align = "v",
+                 labels = c("A", "B", "C", "D", "E"), heights = c(1, 1, 1, 1, 1.2), hjust = -5.2, vjust = 2.5, 
+                 font.label = list(size = 16, face = "bold"), label.x = 0.015)
+ggsave("Benthic invertebrates_Compilation.tiff", width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw", INVERTS)
+
+```
 

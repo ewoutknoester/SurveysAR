@@ -5,15 +5,11 @@ date: "11/08/2022"
 output: html_document
 ---
 
-#TODO: Layout of Treatment x Genus graph & Add sample numbers
-#TODO: Add model for Structure x Size
-#TODO: Layout of death graphs (numbers, colours, legend)
-#TODO: Decide whether to show Treatment in most graphs or Structure type (ie not show compound mix) and adjust graphs accordingly
-
 ```{r setup}
 rm(list=ls()) # Clear workspace
 knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
 
+library(cowplot) # Plot grid
 library(plyr) # Join data frames (vlookup)
 library(readxl)
 library(betareg) # Beta regression
@@ -57,8 +53,8 @@ df0.raw <- read_excel("Structural complexity_Fragment survival_2022-08.xlsx")
 # Convert to long data frame
 df1.clean <- as.data.frame(long_panel(df0.raw, prefix = "_", begin = 0, end = 1, label_location = "end"))
 df1.clean <- select(df1.clean, -c("id", "Experiment"))
-df1.clean <- df1.clean %>% rename(Time = wave)
-df1.clean <- df1.clean %>% rename(Cause.death = Comments)
+df1.clean <- df1.clean %>% dplyr::rename(Time = wave)
+df1.clean <- df1.clean %>% dplyr::rename(Cause.death = Comments)
 
 # Fill NAs with appropriate values
 df1.clean$Cause[is.na(df1.clean$Cause)] <- "Alive"
@@ -107,7 +103,8 @@ df2.surv.nd <- df2.surv[df2.surv$Structure != "DISK", ]
 # Overall survival
 Total.fragments.nd <- as.numeric(nrow(df2.surv.nd))
 Overall.survival.nd <- sum(df2.surv.nd$Survival)/ Total.fragments.nd * 100
-Overall.condition.nd <- mean(df2.surv.nd$Condition)
+Overall.condition.nd.all <- mean(df2.surv.nd$Condition)
+Overall.condition.nd.alive <- mean(df2.surv.nd$Condition[df2.surv.nd$Condition > 0])
 
 # Survival per Structure type
 df3.Structure  <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Treatment" ,"Patch", "Structure", "Number"))
@@ -288,7 +285,7 @@ ggplot(df3.Treatment.d, aes(x = Treatment, y = Survival))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Fragment survival_Treatment on Disk.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment survival_Treatment on Disk.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 
 # ---- TREATMENT ----
@@ -327,7 +324,7 @@ ggplot(df3.Treatment.fig, aes(x = Treatment, y = Survival))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Fragment survival_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment survival_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- STRUCTURE X SIZE ----
 
@@ -335,7 +332,7 @@ ggsave("Fragment survival_Treatment.tiff", width = 23, height = 14, units = "cm"
 ggplot(df3.SizexTreatment, aes(fill = Size, x = Structure, y = Survival))+
   geom_bar(stat = "identity", position = position_dodge())+ 
   labs(y = "Survival (F)", x = "Structure")+
-  scale_y_continuous(limits = c (0, 1), expand = c(0,0))+
+  scale_y_continuous(limits = c (0, 1), expand = c(0,0), )+
   geom_errorbar(aes(ymin=Survival-(1*se), ymax=Survival+(1*se)), width=.2, position=position_dodge(.9))+
   #geom_text(data = df3.Treatment.fig, aes(x=Treatment, y = Survival + (1*se), label = siglet.loc), 
    #         vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
@@ -355,7 +352,7 @@ ggplot(df3.SizexTreatment, aes(fill = Size, x = Structure, y = Survival))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Fragment survival_Structure x Size.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment survival_Structure x Size.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- STRUCTURE X GENUS ----
 
@@ -383,7 +380,7 @@ ggplot(df3.StructurexGenus, aes(fill = Structure, x = Genus, y = Survival))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Fragment survival_Structure x Genus.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment survival_Structure x Genus.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- STRUCTURE ----
 # Post hoc letters
@@ -425,7 +422,6 @@ ggplot(df3.Structure.fig, aes(x = Structure, y = Survival))+
 # ---- DEATHS ----
 
 ## DEATH x TREATMENT
-## TODO: MAYBE BETTER: DEATH x STRUCTURE (as compound is just a mix)
 ggplot(df3.Dead.byTreatment, aes(fill=Cause.death, y=n, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
     scale_fill_manual(values = c("#A93226", "#EB984E", "#82E0AA", "#73C6B6", "#85C1E9", "#D2B4DE", "#5D6D7E",
@@ -444,7 +440,7 @@ ggplot(df3.Dead.byTreatment, aes(fill=Cause.death, y=n, x=Treatment)) +
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Fragment deaths_Treatment.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment deaths_Treatment.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
 
 ## DEATH x GENUS
 ggplot(df3.Dead.byGenus, aes(fill=Cause.death, y=n, x=Genus)) + 
@@ -465,7 +461,141 @@ ggplot(df3.Dead.byGenus, aes(fill=Cause.death, y=n, x=Genus)) +
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Fragment deaths_Genus.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Fragment deaths_Genus.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+# ---- SURVIVAL + DEATH ----
+
+## ==== TREATMENT ====
+## Prepare data frame
+### Get surviving fragments
+deaval <- df3.Treatment.fig
+deaval$Cause.death <- "Alive"
+colnames(deaval)[2] <- "Pct"
+deaval$Pct <- deaval$Pct*100
+
+### Get total fragment per Treatment
+deaval.tot <- df2.surv.nd %>% group_by(Treatment) %>% tally()
+colnames(deaval.tot)[2] <- "n.tot"
+
+### Merge
+deaval <- left_join(deaval, deaval.tot)
+deaval$n.tot <- (deaval$n.tot/100)*deaval$Pct
+deaval <- select(deaval, c("Treatment", "Cause.death", "n.tot", "Pct"))
+colnames(deaval)[3] <- "n"
+deaval <- rbind(deaval, df3.Dead.byTreatment)
+
+### Reduce number of categories
+deaval$Cause.death[deaval$Cause.death == "Toppled"] <- "Fishing"
+deaval$Cause.death[deaval$Cause.death == "Sponge"] <- "Competition"
+deaval$Cause.death[deaval$Cause.death == "Tunicate"] <- "Competition"
+deaval$Cause.death[deaval$Cause.death == "Soft coral"] <- "Competition"
+deaval$Cause.death[deaval$Cause.death == "Hard coral"] <- "Competition"
+deaval$Cause.death[deaval$Cause.death == "COTS"] <- "Predation"
+deaval$Cause.death[deaval$Cause.death == "Snails"] <- "Predation"
+
+### Order
+deaval$Cause.death <- factor(deaval$Cause.death, ordered = TRUE, levels = c("Unknown", "Bleaching", "Fishing", "Turtle", "Competition", "Predation", "Alive"))
+
+### Get percentages
+deaval <- left_join(deaval, deaval.tot, by = "Treatment")
+deaval$Pct.tot <- deaval$n/ deaval$n.tot 
+
+## Add SE
+deaval <- left_join(deaval, df3.Treatment.fig, by = "Treatment")
+deaval <- select(deaval, -c("Pct", "Survival"))
+#deaval$se <- deaval$se*100
+
+### Get fragments number per destiny
+deaval.tot.destiny <- data_summary(deaval, varname = "n.x", groupnames = c("Cause.death"))
+deaval.tot.destiny <- select(deaval.tot.destiny, c("Cause.death", "sum"))
+deaval.tot.destiny$Pct <- (deaval.tot.destiny$sum/sum(deaval.tot.destiny$sum))*100
+
+### Plot
+ggplot(deaval, aes(fill=Cause.death, y=Pct.tot, x=Treatment)) + 
+    geom_bar(position="fill", stat="identity")+
+  scale_fill_manual(values = c("#a4a2a8", "#c8d9e5", "#97bad2", "#7492A7", "#d8b4a0",
+                                 "#d77a61", "#B0E54D"))+
+    labs(y = "Fragments", x = "Treatment", fill = "Cause")+
+    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp"))+
+    scale_y_continuous(expand = c(0,0), labels = scales::percent)+
+    geom_bar(data=deaval[(deaval$Cause.death=="Alive"),],
+      stat = "identity", aes(x = Treatment, y = Pct.tot), alpha=0, size=1, color="black")+
+   geom_errorbar(data=deaval[(deaval$Cause.death=="Alive"),], aes(x = Treatment, ymin=Pct.tot - se,
+                 ymax=Pct.tot + se), width=.1, size = 0.6)+
+   geom_text(data=deaval[(deaval$Cause.death=="Alive"),], aes(x=Treatment, y = Pct.tot - (1.8*se), 
+            label = siglet.loc), size = 5, fontface = "bold")+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-1, size = 14),
+      axis.text.x=element_text(size=12, face = "bold", vjust=3),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      legend.text=element_text(size=11),
+      legend.title= element_blank(),
+      plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm"),
+      legend.position = "right"
+      )
+ggsave("Fragments_Destiny.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
+
+## ==== GENUS ====
+## Prepare data frame
+### Get surviving fragments
+deaval.tot.genus <- df2.surv.nd %>% group_by(Genus, Survival) %>% tally()
+deaval.tot.genus <- spread(deaval.tot.genus, key = Survival, value = n)
+names(deaval.tot.genus) <- c("Genus", "Cause.death", "n")
+deaval.tot.genus$Pct <- 0
+deaval.tot.genus$Cause.death <- "Alive"
+
+### Merge
+deaval.tot.genus <- rbind(deaval.tot.genus, df3.Dead.byGenus)
+
+### Reduce number of categories
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Toppled"] <- "Fishing"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Sponge"] <- "Competition"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Tunicate"] <- "Competition"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Soft coral"] <- "Competition"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Hard coral"] <- "Competition"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "COTS"] <- "Predation"
+deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Snails"] <- "Predation"
+
+### Order
+deaval.tot.genus$Cause.death <- factor(deaval.tot.genus$Cause.death, ordered = TRUE, levels = c("Unknown", "Bleaching", "Fishing", "Turtle", "Competition", "Predation", "Alive"))
+
+
+## Plot
+
+deaval.tot.genus.tot <- aggregate(deaval.tot.genus$n, by=list(Genus=deaval.tot.genus$Genus), FUN=sum)
+deaval.tot.genus <- left_join(deaval.tot.genus, deaval.tot.genus.tot, by = "Genus")
+deaval.tot.genus$Pct.tot <- deaval.tot.genus$n/ deaval.tot.genus$x
+
+deaval.plot.genus <- ggplot(deaval.tot.genus, aes(fill=Cause.death, y=Pct.tot, x=Genus)) + 
+    geom_bar(position="fill", stat="identity")+
+      scale_fill_manual(values = c("#a4a2a8", "#c8d9e5", "#97bad2", "#7492A7", "#d8b4a0",
+                                 "#d77a61", "#B0E54D"))+
+    labs(y = "Fragments", x = "Genus", fill = "Cause")+
+    scale_y_continuous(expand = c(0,0), labels = scales::percent)+
+    geom_bar(data=deaval.tot.genus[(deaval.tot.genus$Cause.death=="Alive"),],
+      stat = "identity", aes(x = Genus, y = Pct.tot), alpha=0, size=0.8, color="black")+
+    theme_economist()+
+    theme(
+      axis.title.x = element_text(color="black", vjust=-1, size = 14),
+      axis.text.x=element_text(size=12, face = "bold.italic", vjust=3),
+      axis.title.y = element_text(color="black" , vjust=4, size = 14),
+      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
+      legend.text=element_text(size=11),
+      legend.title= element_blank(),
+      plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm"),
+      panel.background = element_rect(fill = "#FCFCFC"),
+      plot.background = element_rect(fill = "#FFFFFF"),
+      panel.grid.major = element_line(colour = "#797979", size = 0.3),
+      axis.ticks.length = unit(0.15, "cm"),
+      legend.position = "right"
+      )
+ggsave("Fragments_Destiny_Genus.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
 
 ```
 

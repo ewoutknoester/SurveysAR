@@ -1,0 +1,171 @@
+---
+title: "Correlations structural complexity"
+author: "Ewout Knoester"
+date: "10/03/2022"
+output: html_document
+---
+
+# TODO: Chose which correlations to show in final graph
+# TO DO: add error bars
+
+# Setup
+```{r setup, include=FALSE}
+
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+
+library(readxl) # Import excel sheets
+library(writexl)
+library(tidyverse) # Data manipulation and plotting
+library(plyr) # Data summary
+library(ggthemes) # pretty plots
+library(ggpubr) # Arrange plots
+library(data.table) # means multiple columns by factor
+
+# Function to facilitate averaging dataset
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+```
+
+
+
+
+
+```{r data loading}
+
+# Load summary Excels for correlations
+HC <- read_excel("Structural complexity_Benthic cover_2022-08_Hard coral per patch.xlsx")
+FISH <- read_excel("Structural complexity_Fish surveys_2022-08_Averages per patch.xlsx")
+
+# Selection
+HC <- select(HC, c("Transect", "Cover"))
+HC$Cover <- HC$Cover * 100
+
+# Merge
+Averages <- left_join(HC, FISH, by = "Transect")
+colnames(Averages)[which(names(Averages) == "ReefType")] <- "Treatment"
+
+Averages.selection <- subset(Averages, Treatment != "Ref (+)" & Treatment != "Ref (-)")
+
+# Set outlier high biomass to equal second highest value
+Averages.selection$Biomass <- ifelse(Averages.selection$Biomass == max(Averages.selection$Biomass), 
+                       max(Averages.selection$Biomass[Averages.selection$Biomass != max(Averages.selection$Biomass)]), Averages.selection$Biomass)
+
+```
+
+# Correlations
+```{r correlations}
+
+cors <- as.data.frame(correlation::correlation(Averages.selection, p_adjust = "none"))
+cors <- subset(cors, Parameter1 == "Cover")
+cors$ID <- paste(cors$Parameter1, cors$Parameter2, sep = "X")
+cors <- cors[c(3, 9, 12)]
+cors$r <- round(cors$r, 2)
+cors$p <- round(cors$p, 5)
+cors$star <- ifelse(cors$p <= 0.001, "***",
+  ifelse(cors$p <= 0.01, "**", 
+    ifelse(cors$p <= 0.05, "*", "")))
+cors$sum <- paste("r = ", cors$r, cors$star, sep = "")
+
+```
+
+# Compiled Fig
+```{r}
+# Layout:
+co <- c("#B0E54D", "#6FDCD9", "#F0C862", "#EC86BF") # Colour palette ,"#D04E08", "#0673B0"
+Mar <- c(15,0,15,0) # Plot margins
+
+S <- ggplot(Averages.selection, aes(x = Cover, y = S))+
+  geom_point(aes(colour = Treatment), size = 6)+
+  scale_color_manual(values = co)+
+  scale_x_continuous("Coral cover AR (%)")+
+  scale_y_continuous("Fish species richness (S)")+
+  geom_smooth(colour = "black", method = "lm", se = TRUE, size = 1.2, fullrange = TRUE)+ 
+  theme(
+    text = element_text(size = 16),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text(color = "black", size = 14, vjust = 2),
+    axis.text.y = element_text(angle = 0, size = 14, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype = 1),
+    panel.border = element_rect(colour = "white", fill = NA, size = 0.5),
+    legend.key = element_rect(fill = "#FFFFFF"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "#FCFCFC", size = 0.1),
+    plot.margin = margin(Mar, "cm"))+
+  guides(shape = guide_legend(order = 2), colour = guide_legend(order = 1))+
+  annotate("text", x = 30, y = 24, label = cors$sum[cors$ID == "CoverXS"], size = 5)
+
+A <- ggplot(Averages.selection, aes(x = Cover, y = Abundance))+
+  geom_point(aes(colour = Treatment), size = 6)+
+  scale_color_manual(values = co)+
+  scale_x_continuous("Coral cover AR (%)")+
+  scale_y_continuous(expression(paste("Fish abundance (", m^-2,")")))+
+  geom_smooth(colour = "black", method = "lm", se = TRUE, size = 1.2, fullrange = TRUE)+ 
+  theme(
+    text = element_text(size = 16),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text(color = "black", size = 14, vjust = 2),
+    axis.text.y = element_text(angle = 0, size = 14, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype = 1),
+    panel.border = element_rect(colour = "white", fill = NA, size = 0.5),
+    legend.key = element_rect(fill = "#FFFFFF"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "#FCFCFC", size = 0.1),
+    plot.margin = margin(Mar, "cm"))+
+  guides(shape = guide_legend(order = 2), colour = guide_legend(order = 1))+
+  annotate("text", x = 40, y = 2.2, label = cors$sum[cors$ID == "CoverXAbundance"], size = 5)
+
+B <- ggplot(Averages.selection, aes(x = Cover, y = Biomass))+
+  geom_point(aes(colour = Treatment), size = 6)+
+  scale_color_manual(values = co)+
+  scale_x_continuous("Coral cover AR (%)")+
+  scale_y_continuous(expression(paste("Fish biomass (kg ", ha^-1,")")))+
+  geom_smooth(colour = "black", method = "lm", se = TRUE, size = 1.2, fullrange = TRUE)+ 
+  theme(
+    text = element_text(size = 16),
+    axis.title.x = element_text(color = "black", vjust = -1, size = 14),
+    axis.text.x = element_text(angle = 0, size = 14, face = "bold", vjust = 0),
+    axis.title.y = element_text(color = "black", size = 14, vjust = 2),
+    axis.text.y = element_text(angle = 0, size = 14, face = "bold", vjust=0),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    axis.line = element_line(size = 0.5, colour = "Black", linetype = 1),
+    panel.border = element_rect(colour = "white", fill = NA, size = 0.5),
+    legend.key = element_rect(fill = "#FFFFFF"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "#FCFCFC", size = 0.1),
+    plot.margin = margin(Mar, "cm"))+
+  guides(shape = guide_legend(order = 2), colour = guide_legend(order = 1))+
+  annotate("text", x = 45, y = 110, label = cors$sum[cors$ID == "CoverXBiomass"], size = 5)
+
+# Combine
+figure <- ggarrange(S, A, B, 
+          labels = c("A", "B", "C"), font.label = list(size = 18, face = "bold"), vjust = 3, hjust = -4.5,
+          ncol = 1, heights = c(1, 1, 1.15), common.legend = T, legend = "top", align = "v")+
+  theme(plot.margin = margin(0,0,0,0.1, "cm"))
+
+ggsave("Correlations.tiff", figure, width = 18, height = 24, units = "cm", dpi=1200, compression = "lzw")
+
+
+```
+
+
+
+

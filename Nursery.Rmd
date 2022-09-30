@@ -1,0 +1,109 @@
+---
+title: "Nursery"
+author: "Ewout Knoester"
+date: "12/09/2022"
+output: html_document
+---
+
+# Setup
+```{r setup, include=FALSE}
+rm(list=ls()) # Clear workspace
+knitr::opts_knit$set(root.dir = '/tmp') #Set directory at current directory for all subsequent chunks
+
+library(readxl) # Import excel sheets
+library(tidyverse) # Tidy data
+library(panelr) # Convert data from wide to long
+library(ggthemes) # Pretty plots
+library(writexl) # Export Excel
+
+# Function to facilitate averaging datasets
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(sum = sum(x[[col]]),
+      mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE),
+      n  = length(x[[col]]),
+      se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- plyr::rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+```
+
+
+# Data selection (preparing dataset for archiving & sharing)
+```{r data selection, warning= FALSE}
+
+# Import excel sheet
+raw.data <- read_excel("Raw data/Coral growth - nurseries_2022-08.xlsx", sheet = 2, skip = 1)
+
+# Convert to long data frame
+raw.data.2 <- as.data.frame(long_panel(raw.data, prefix = "_", begin = 0, end = 13, label_location = "end"))
+
+# Format data
+raw.data.2$Date <- as.Date(raw.data.2$Date)
+
+# Select relevant nurseries & their end date (1 year after start nursery)
+surv <- subset(raw.data.2, 
+        Batch == 1 & 
+          (Structure == "Tree 042" & (Species == "Acropora verweyi" | Species == "Acropora formosa") &
+             (Date == "2019-05-04")) |
+          (Structure == "Tree 022" & (Species == "Acropora formosa") &
+             (Date == "2018-03-02")) |
+          (Structure == "Tree 095" & (Species == "Pocillopora verrucosa" | Species == "Porites cylindrica") &
+            (Date == "2019-10-16"))  |
+          (Structure == "Tree 005" & (Species == "Millepora tenera" | Species == "Pocillopora verrucosa") & 
+            (Date == "2017-04-25"))  |
+          (Structure == "Tree 009" & Species == "Millepora tenera" & 
+            (Date == "2017-06-21")) | 
+          (Structure == "Tree 047" & (
+            Species == "Stylophora subseriata" | Species == "Pocillopora verrucosa" | Species == "Porites cylindrica") & 
+            (Date == "2019-05-07")) |
+          (Structure == "Tree 058" & Species == "Stylophora subseriata" & 
+            (Date == "2019-05-09")))
+
+# Omit a few missing fragments
+surv <- surv %>% drop_na(Condition)
+surv[is.na(surv)] <- ""
+surv <- subset(surv, Exclude != "Missing" & Exclude != "Exclude")
+
+surv.selex <- select(surv, c("Species", "Condition"))
+
+# EXPORT DATA SELECTION
+write_xlsx(surv.selex, "Structural complexity_Nursery selection_2022-08.xlsx")
+
+```
+
+# Data prep 
+<!--
+Data info:
+  Data of several types of benthic surveys
+  Dead corals were classified as Dead when the genus could still be recognized or as Bare rock when not
+-->
+```{r data prep}
+
+# Load data
+df2.selex <- read_excel("Structural complexity_Nursery selection_2022-08.xlsx")
+
+# Merge Acropora species into single genus
+df2.selex$Species[df2.selex$Species == "Acropora verweyi"] <- "Acropora"
+df2.selex$Species[df2.selex$Species == "Acropora formosa"] <- "Acropora"
+
+# Get survival (binary) from condition (live tissue percentage)
+df2.selex$Survival <- ifelse(df2.selex$Condition > 0, 100, 0)
+
+# Summarize
+df2.selex.avg.Cond <- data_summary(df2.selex, varname = "Condition", groupnames = c("Species"))
+df2.selex.avg.Surv <- data_summary(df2.selex, varname = "Survival", groupnames = c("Species"))
+
+```
+
+
+
+
+
+
+

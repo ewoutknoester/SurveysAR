@@ -19,6 +19,7 @@ library(plyr) # Join data frames (vlookup)
 library(readxl)
 library(writexl) # Export Excel
 library(data.table)
+library(cowplot) # Plot grid
 library(stringr) # Select text from string
 library(nlme) # GLS
 library(lme4) # Gamma
@@ -68,7 +69,7 @@ df1.clean <- as.data.frame(long_panel(df1.clean, prefix = "_", begin = 1, end = 
 
 # Clean up
 df1.clean <- select(df1.clean, -c("id", "ID"))
-df1.clean <- df1.clean %>% rename(Recruits = Genus, Genum = wave)
+df1.clean <- df1.clean %>% dplyr::rename(Recruits = Genus, Genum = wave)
 ## Get treatment from patch names
 df1.clean$Patch.type <- str_replace(df1.clean$Patch, pattern = ".*-([^-]*)-.*", replacement = "\\1") # Isolate AR patch type
 df1.clean$Patch.type <- str_to_title(df1.clean$Patch.type) # Capitalize first letter only
@@ -142,10 +143,11 @@ Data info:
 -->
 ```{r data cleaning}
 
-# Load data
+# ---- DATA PREP ----
+## Load data
 df2.selex <- read_excel("Structural complexity_Recruit counts_2022-02.xlsx")
 
-# Set variables
+## Set variables
 df2.selex$Zone <- as.factor(df2.selex$Zone)
 df2.selex$Treatment <- as.factor(df2.selex$Treatment)
 df2.selex$Patch <- as.factor(df2.selex$Patch)
@@ -155,15 +157,16 @@ df2.selex$Orientation <- as.factor(df2.selex$Orientation)
 df2.selex$Substrate <- as.factor(df2.selex$Substrate)
 df2.selex$Genus <- as.factor(df2.selex$Genus)
 
-# SUMMARIES
+# ---- SUMMARIES ----
 Recruits.tot <- sum(df2.selex$Recruits)
 
-# Per STRUCTURE
+## ==== Per STRUCTURE ====
+### Create data frame
 df2.Structure <- data_summary(df2.selex, varname = "Recruits", groupnames = c("Zone","Treatment" ,"Patch", "Structure", "Number"))
 df2.Structure <- select(df2.Structure, c("Zone", "Treatment" ,"Patch",  "Structure", "Number", "sum"))
-df2.Structure <- df2.Structure %>% rename(Recruits.N = sum)
+df2.Structure <- df2.Structure %>% dplyr::rename(Recruits.N = sum)
 
-# Add projected surface areas, so recruit densities can be estimated
+### Add projected surface areas, so recruit densities can be estimated
 df2.Structure$SA.projected <- ifelse(grepl("BRU", df2.Structure$Structure), 1, 
                               ifelse(grepl("Cake", df2.Structure$Structure), 2,
                               ifelse(grepl("Cage", df2.Structure$Structure), 4,       
@@ -174,73 +177,95 @@ write_xlsx(df2.Structure, "Correlation data/Structural complexity_Correlations_R
 
 df2.Structure.nodisk <- df2.Structure[!grepl("Disk", df2.Structure$Structure), ]
 
-# Totaling for all structures, divided by patch area (16 m2)
+### Totaling for all structures, divided by patch area (16 m2)
 df2.Patch <- data_summary(df2.Structure.nodisk, varname = "Recruits.N", groupnames = c("Zone","Treatment" ,"Patch"))
 df2.Patch <- select(df2.Patch, c("Zone", "Treatment" ,"Patch", "sum"))
-df2.Patch <- df2.Patch %>% rename(Recruits.N = sum)
+df2.Patch <- df2.Patch %>% dplyr::rename(Recruits.N = sum)
 df2.Patch$Recruits.M2 <- df2.Patch$Recruits.N/16
 
-# Per TREATMENT (excluding experimental disks)
+## ==== Per TREATMENT (excluding experimental disks) ====
 df2.Treatment <- data_summary(df2.Patch, varname = "Recruits.M2", groupnames = c("Treatment"))
 df2.Treatment <- select(df2.Treatment, -c("sd", "sum"))
 
-# Per EXPERIMENTAL DISKS
+## ==== Per EXPERIMENTAL DISKS ====
 df2.Disk.Patch <- df2.Structure[grepl("Disk", df2.Structure$Structure), ]
 df2.Disk.Patch <- data_summary(df2.Disk.Patch, varname = "Recruits.N", groupnames = c("Zone","Treatment" ,"Patch"))
 df2.Disk.Patch <- select(df2.Disk.Patch, c("Zone", "Treatment" ,"Patch", "sum"))
-df2.Disk.Patch <- df2.Disk.Patch %>% rename(Recruits.M2 = sum) # 4 disks of 0.25 m2 = 1m2 so no need to divide
-## Per treatment
+df2.Disk.Patch <- df2.Disk.Patch %>% dplyr::rename(Recruits.M2 = sum) # 4 disks of 0.25 m2 = 1m2 so no need to divide
+### Per treatment
 df2.Disk.Treatment <- data_summary(df2.Disk.Patch, varname = "Recruits.M2", groupnames = c("Treatment"))
 df2.Disk.Treatment <- select(df2.Disk.Treatment, -c("sd", "sum"))
 
-# Per Substrate
-df2.Substrate <- df2.selex[!grepl("Quadrat", df2.selex$Structure), ]
-Recruits.tot.AR <- sum(df2.Substrate$Recruits)
-# First sum recruit counts over all possible genera and layers 
-df2.Substrate <- data_summary(df2.Substrate, varname = "Recruits", groupnames = c("Patch", "Structure", "Number", "Substrate"))
-# Then get exact surface area for each structure
+## ==== Per SUBSTRATE ====
+### Create data frame
+df2.Substrate <- df2.selex[!grepl("Quadrat", df2.selex$Structure), ] # Select ARs only
+
+### Quick summary: total recruits ARs
+Recruits.tot.AR <- sum(df2.Substrate$Recruits) 
+
+### First sum recruit counts for each Patch over all possible structures, genera and layers 
+df2.Substrate <- data_summary(df2.Substrate, varname = "Recruits", groupnames = c("Patch", "Substrate"))
+### Then get exact surface area for each Patch, per substrate
 df2.Substrate.SA <- df2.selex[!grepl("Quadrat", df2.selex$Structure), ]
 df2.Substrate.SA <- data_summary(df2.Substrate.SA, varname = "Surface.m2", groupnames = c("Patch", "Structure", "Number", "Layer", "Orientation", "Substrate")) # Get rid of Genera
-df2.Substrate.SA <- data_summary(df2.Substrate.SA, varname = "Surface.m2", groupnames = c("Patch", "Structure", "Number", "Substrate"))
-# Merge recruit counts with sum of surface area
-df2.Substrate <- df2.Substrate[order(df2.Substrate$Number),]
-df2.Substrate.SA <- df2.Substrate.SA[order(df2.Substrate.SA$Number),]
+df2.Substrate.SA <- data_summary(df2.Substrate.SA, varname = "Surface.m2", groupnames = c("Patch",  "Substrate"))
+### Merge recruit counts with sum of surface area (based on ordering(!))
 df2.Substrate$Surface.m2 <- df2.Substrate.SA$sum
+### Calculate recruit density based on Patch (ie sum over size differences various ARs within compound patch)
 df2.Substrate$Recruits.M2 <- df2.Substrate$sum/ df2.Substrate$Surface.m2
-# Summarize per Patch
-df2.Substrate.patch <- data_summary(df2.Substrate, varname = "Recruits.M2", groupnames = c("Patch" ,"Substrate"))
-df2.Substrate.patch <- select(df2.Substrate.patch, -c("sd", "sum"))
+df2.Substrate.patch <- select(df2.Substrate, c("Patch", "Substrate", "Recruits.M2"))
+### Final averaging over Substrate only
 df2.Substrate.patch.avg <- data_summary(df2.Substrate.patch, varname = "Recruits.M2", groupnames = c("Substrate"))
 df2.Substrate.patch.avg <- select(df2.Substrate.patch.avg, -c("sd", "sum"))
-# Summarize over all structures
-df2.Substrate.avg <- data_summary(df2.Substrate, varname = "Recruits.M2", groupnames = c("Substrate"))
-df2.Substrate.avg <- select(df2.Substrate.avg, -c("sd", "sum"))
 
-# Per Orientation
+## ==== GENUS x SUBSTRATE ====
+df2.Substrate.genus <- df2.selex[!grepl("Quadrat", df2.selex$Structure), ] # Select ARs only
+### Summarize by Patch over different structures and layers
+df2.Substrate.genus <- data_summary(df2.Substrate.genus, varname = "Recruits", groupnames = c("Patch", "Substrate", "Genus"))
+df2.Substrate.genus <- select(df2.Substrate.genus, -c("Recruits","n", "sd","se"))
+### Then get exact surface area for each Patch, per substrate
+df2.Substrate.genus$Namer <- paste(df2.Substrate.genus$Patch, df2.Substrate.genus$Substrate, sep = ".")
+df2.Substrate.SA$Namer <- paste(df2.Substrate.SA$Patch, df2.Substrate.SA$Substrate, sep = ".")
+df2.Substrate.SA <- select(df2.Substrate.SA, c("Namer", "sum"))
+df2.Substrate.genus <- merge(df2.Substrate.genus, df2.Substrate.SA, by = "Namer")
+df2.Substrate.genus$Recruits.M2AR <- df2.Substrate.genus$sum.x/df2.Substrate.genus$sum.y
+### Summarize over Patches
+df2.Substrate.genus.avg <- data_summary(df2.Substrate.genus, varname = "Recruits.M2AR", groupnames = c("Substrate", "Genus"))
+df2.Substrate.genus.avg <- select(df2.Substrate.genus.avg, -c(4:7))
+### Summarize on Substrate only
+df2.Substrate.genus.avg.avg <- data_summary(df2.Substrate.genus.avg, varname = "Recruits.M2AR", groupnames = c("Substrate"))
+### Ordering
+df2.Genus.abuGS <- data_summary(df2.Substrate.genus, varname = "Recruits.M2AR", groupnames = c("Genus"))
+df2.Genus.abuGS$Recruits.pct <- df2.Genus.abuGS$Recruits.M2AR / sum(df2.Genus.abuGS$Recruits.M2AR) * 100
+df2.Genus.abuGS$Genus.o <- ifelse(df2.Genus.abuGS$Recruits.pct > 0.2, as.character(df2.Genus.abuGS$Genus), "Other")
+df2.Genus.abuGS <- select(df2.Genus.abuGS, c("Genus", "Genus.o" ,"Recruits.pct"))
+df2.Substrate.genus.avg <- left_join(df2.Substrate.genus.avg, df2.Genus.abuGS, by = "Genus")
+
+## ==== Per ORIENTATION ====
 df2.Orientation <- df2.selex[!grepl("Quadrat", df2.selex$Structure), ]
 df2.Orientation <- df2.Orientation[grepl("Cement", df2.Orientation$Substrate), ]
-# First sum recruit counts over all possible genera and layers 
+### First sum recruit counts over all possible genera and layers 
 df2.Orientation <- data_summary(df2.Orientation, varname = "Recruits", groupnames = c("Patch", "Structure", "Number", "Orientation", "Surface.m2"))
 df2.Orientation$Recruits.M2 <- df2.Orientation$sum/ df2.Orientation$Surface.m2
-# Summarize over all structures and patches
+### Summarize over all structures and patches
 df2.Orientation.avg <- data_summary(df2.Orientation, varname = "Recruits.M2", groupnames = c("Orientation"))
 df2.Orientation.avg <- select(df2.Orientation.avg, -c("sd", "sum"))
 
-# Per Genus
-## Set desired grouping
+## ==== Per Genus ====
+### Set desired grouping
 df2.selex.genus <- df2.selex
 df2.selex.genus$Genus[df2.selex.genus$Genus == "Cyphastrea"] <- "MERULINIDAE"  
 df2.selex.genus$Genus[df2.selex.genus$Genus == "Favites"] <- "MERULINIDAE"
 df2.selex.genus$Genus[df2.selex.genus$Genus == "Dipsastraea"] <- "MERULINIDAE"
 df2.selex.genus$Genus[df2.selex.genus$Genus == "Goniastrea"] <- "MERULINIDAE"
-## Sort most common Genera set Others for less common
+### Sort most common Genera set Others for less common
 df2.Genus.abu <- data_summary(df2.selex.genus, varname = "Recruits", groupnames = c("Genus"))
 df2.Genus.abu$Recruits.pct <- df2.Genus.abu$sum / Recruits.tot * 100
 df2.Genus.abu <- df2.Genus.abu[rev(order(df2.Genus.abu$Recruits.pct)),]
 df2.Genus.abu$Genus.o <- ifelse(df2.Genus.abu$Recruits.pct > 2, as.character(df2.Genus.abu$Genus), "Other")
 df2.Genus.abu <- select(df2.Genus.abu, c("Genus", "Genus.o" ,"Recruits.pct"))
 df2.Genus.abux <- select(df2.Genus.abu, c("Genus", "Genus.o"))
-## Split between reference reef and artificial reef
+### Split between reference reef and artificial reef
 df2.selex.genus$Reef.type <- ifelse(grepl("BRU", df2.selex.genus$Treatment), "Artificial reef", 
                              ifelse(grepl("Cake", df2.selex.genus$Treatment), "Artificial reef",
                              ifelse(grepl("Cage", df2.selex.genus$Treatment), "Artificial reef",       
@@ -248,45 +273,70 @@ df2.selex.genus$Reef.type <- ifelse(grepl("BRU", df2.selex.genus$Treatment), "Ar
 df2.Genus.abu.reef <- df2.selex.genus[!grepl("-", df2.selex.genus$Treatment), ]
 df2.Genus.abu.reef <- data_summary(df2.Genus.abu.reef, varname = "Recruits", groupnames = c("Reef.type" ,"Genus"))
 df2.Genus.abu.reef <- select(df2.Genus.abu.reef, c("Reef.type", "Genus", "sum"))
-df2.Genus.abu.reef <- df2.Genus.abu.reef %>% rename(Recruits.N = sum)
+df2.Genus.abu.reef <- df2.Genus.abu.reef %>% dplyr::rename(Recruits.N = sum)
 df2.Genus.abu.reef$SA.tot <- ifelse(grepl("Artificial", df2.Genus.abu.reef$Reef.type), 640, 160)
 df2.Genus.abu.reef$Recruits.M2 <- df2.Genus.abu.reef$Recruits.N/ df2.Genus.abu.reef$SA.tot
-# Ordering
+### Ordering
 df2.Genus.abuRT <- data_summary(df2.Genus.abu.reef, varname = "Recruits.M2", groupnames = c("Genus"))
 df2.Genus.abuRT$Recruits.pct <- df2.Genus.abuRT$Recruits.M2 / sum(df2.Genus.abuRT$Recruits.M2) * 100
 df2.Genus.abuRT$Genus.o <- ifelse(df2.Genus.abuRT$Recruits.pct > 0.5, as.character(df2.Genus.abuRT$Genus), "Other")
 df2.Genus.abuRT <- select(df2.Genus.abuRT, c("Genus", "Genus.o" ,"Recruits.pct"))
 df2.Genus.abu.reef <- left_join(df2.Genus.abu.reef, df2.Genus.abuRT, by = "Genus")
-## Adjust naming
+### Adjust naming
 df2.selex.genus <- left_join(df2.selex.genus, df2.Genus.abux, by = "Genus")
-## First counts per Patch
+
+### #### With disks ####
+#### First counts per Patch
 df2.Genus.Patch <- data_summary(df2.selex.genus, varname = "Recruits", groupnames = c("Zone", "Treatment", "Patch", "Genus.o"))
 df2.Genus.Patch$Recruits.M2 <- df2.Genus.Patch$sum/16
-## Then summarize per Treatment
+#### Then summarize per Treatment
 df2.Genus.Treatment <- data_summary(df2.Genus.Patch, varname = "Recruits.M2", groupnames = c("Treatment", "Genus.o"))
 df2.Genus.Treatment <- select(df2.Genus.Treatment, -c("sd", "sum"))
 
-# Genus x Orientation
+### #### Without disks ####
+df2.Genus.Patch.nd <- df2.selex.genus[!grepl("Disk", df2.selex.genus$Structure), ]
+df2.Genus.Patch.nd <- data_summary(df2.Genus.Patch.nd, varname = "Recruits", groupnames = c("Zone", "Treatment", "Patch", "Genus.o"))
+df2.Genus.Patch.nd$Recruits.M2 <- df2.Genus.Patch.nd$sum/16
+#### Then summarize per Treatment
+df2.Genus.Treatment.nd <- data_summary(df2.Genus.Patch.nd, varname = "Recruits.M2", groupnames = c("Treatment", "Genus.o"))
+df2.Genus.Treatment.nd <- select(df2.Genus.Treatment.nd, -c("sd", "sum"))
+
+### #### Disks only ####
+df2.Genus.Patch.d <- df2.selex.genus[grepl("Disk", df2.selex.genus$Structure) | grepl("Quadrat", df2.selex.genus$Structure), ]
+df2.Genus.Patch.d <- data_summary(df2.Genus.Patch.d, varname = "Recruits", groupnames = c("Zone", "Treatment", "Patch", "Genus.o"))
+df2.Genus.Patch.d$Recruits.M2 <- df2.Genus.Patch.d$sum/16
+#### Then summarize per Treatment
+df2.Genus.Treatment.d <- data_summary(df2.Genus.Patch.d, varname = "Recruits.M2", groupnames = c("Treatment", "Genus.o"))
+df2.Genus.Treatment.d <- select(df2.Genus.Treatment.d, -c("sd", "sum"))
+
+## ==== GENUS x ORIENTATION ====
 df2.GenusxOrientation <- df2.selex.genus[grepl("Cement", df2.selex.genus$Substrate), ]
+### Absolute numbers
+df2.GenusxOrientation.count <- data_summary(df2.GenusxOrientation, varname = "Recruits", groupnames = c("Genus"))
+df2.GenusxOrientation.count <- select(df2.GenusxOrientation.count, c("Genus", "sum"))
+### Density
 df2.GenusxOrientation <- data_summary(df2.GenusxOrientation, varname = "Recruits.M2AR", groupnames = c("Orientation" ,"Genus"))
 df2.GenusxOrientation <- select(df2.GenusxOrientation, c("Orientation", "Genus", "Recruits.M2AR"))
-# Ordering
+### Merge
+df2.GenusxOrientation <- left_join(df2.GenusxOrientation, df2.GenusxOrientation.count, by = "Genus")
+### Ordering
 df2.Genus.abuGO <- data_summary(df2.GenusxOrientation, varname = "Recruits.M2AR", groupnames = c("Genus"))
 df2.Genus.abuGO$Recruits.pct <- df2.Genus.abuGO$Recruits.M2AR / sum(df2.Genus.abuGO$Recruits.M2AR) * 100
 df2.Genus.abuGO$Genus.o <- ifelse(df2.Genus.abuGO$Recruits.pct > 0.5, as.character(df2.Genus.abuGO$Genus), "Other")
+df2.Genus.abuGO$Genus.o[df2.Genus.abuGO$Genus.o == "Unknown"] <- "Other"
 df2.Genus.abuGO <- select(df2.Genus.abuGO, c("Genus", "Genus.o" ,"Recruits.pct"))
 df2.GenusxOrientation <- left_join(df2.GenusxOrientation, df2.Genus.abuGO, by = "Genus")
-
-# Genus x Substrate
-df2.GenusxSubstrate<- df2.selex.genus[!grepl("Reference", df2.selex.genus$Treatment), ]
-df2.GenusxSubstrate <- data_summary(df2.GenusxSubstrate, varname = "Recruits.M2AR", groupnames = c("Substrate" ,"Genus"))
-df2.GenusxSubstrate <- select(df2.GenusxSubstrate, c("Substrate", "Genus", "Recruits.M2AR"))
-# Ordering
-df2.Genus.abuGS <- data_summary(df2.GenusxSubstrate, varname = "Recruits.M2AR", groupnames = c("Genus"))
-df2.Genus.abuGS$Recruits.pct <- df2.Genus.abuGS$Recruits.M2AR / sum(df2.Genus.abuGS$Recruits.M2AR) * 100
-df2.Genus.abuGS$Genus.o <- ifelse(df2.Genus.abuGS$Recruits.pct > 0.1, as.character(df2.Genus.abuGS$Genus), "Other")
-df2.Genus.abuGS <- select(df2.Genus.abuGS, c("Genus", "Genus.o" ,"Recruits.pct"))
-df2.GenusxSubstrate <- left_join(df2.GenusxSubstrate, df2.Genus.abuGS, by = "Genus")
+### Sum over Others
+Orientation.others <- sum(sum(df2.GenusxOrientation[which(df2.GenusxOrientation$Genus.o=='Other'), "sum"]))
+### Add recruit numbers to name
+df2.GenusxOrientation$Genus.o <- ifelse(df2.GenusxOrientation$Genus.o == "Other", 
+    paste("Other", " (", Orientation.others, ")", sep = ""),
+    paste(df2.GenusxOrientation$Genus.o, " (", df2.GenusxOrientation$sum, ")", sep = "")) 
+### Sum 'Others'
+df2.GenusxOrientation <- data_summary(df2.GenusxOrientation, varname = "Recruits.M2AR", groupnames = c("Genus.o", "Orientation"))
+df2.GenusxOrientation <- select(df2.GenusxOrientation, c("Genus.o", "Orientation", "sum"))
+### Get numbers for ordering
+df2.GenusxOrientation$Counts <- as.numeric(sub('.*\\((.*)\\).*', '\\1', df2.GenusxOrientation$Genus.o))
 
 ```
 
@@ -312,19 +362,17 @@ anova(lm.T1)
 # ---- SUBSTRATE ----
 ## Done per Structure. Averaging per Patch and/or Gamma distribution did not help to solve heavy right skew, so interpret results with caution
 ## Prepare a new data frame for Log transformation
-df2.Substrate.log <- df2.Substrate
+df2.Substrate.log <- df2.Substrate.patch
 df2.Substrate.log$Recruits.M2[df2.Substrate.log$Recruits.M2 == 0] <- min(df2.Substrate.log$Recruits.M2[df2.Substrate.log$Recruits.M2>0])/2# Set zeros to smallest value/2
+## Deselct plates & coral: only look at AR substrate:
+df2.Substrate.log <- subset(df2.Substrate.log, Substrate != "Plate" & Substrate != "Coral")
 
 ## Random factors to account for non-independence of various Substrates on same Structure and numerous Structures within a Patch
-lme.S1 <- lme(log10(Recruits.M2) ~ Substrate, random = ~1 | Patch/Structure, 
+lme.S1 <- lme(log10(Recruits.M2) ~ Substrate, random = ~1 | Patch, 
                data = df2.Substrate.log)
 
-## Allowing for heterogeneity (based on improved residual plots)
-lme.S1w  <- lme(log10(Recruits.M2) ~ Substrate, random = ~1 | Patch,
-                  data = df2.Substrate.log, weights = varIdent(form = ~1 | Structure))
-
 # Model output
-anova(lme.S1w)
+anova(lme.S1)
 
 # ---- ORIENTATION ----
 ## Prepare a new data frame for Log transformation
@@ -361,7 +409,7 @@ plot(fitted(mod) ~ log10(df2.Patch$Recruits.M2)) # response data vs fitted
 par(op)
 
 # SUBSTRATE
-mod <- lme.S1w # set model to be validated
+mod <- lme.S1 # set model to be validated
 op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
 plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
 abline(0,0)
@@ -394,7 +442,7 @@ par(op)
 hsd.Treatment <- emmeans(lm.T1, specs = pairwise ~ Treatment, adjust = "tukey", type = "response")
 
 # SUBSTRATE
-hsd.Substrate <- emmeans(lme.S1w, specs = pairwise ~ Substrate, adjust = "tukey", type = "response")
+hsd.Substrate <- emmeans(lme.S1, specs = pairwise ~ Substrate, adjust = "tukey", type = "response")
 
 # SUBSTRATE
 hsd.Orientation <- emmeans(lme.O1w, specs = pairwise ~ Orientation, adjust = "tukey", type = "response")
@@ -405,19 +453,104 @@ hsd.Orientation <- emmeans(lme.O1w, specs = pairwise ~ Orientation, adjust = "tu
 # Plot
 ```{r plot}
 
-# ---- TREATMENT ----
-# Post hoc letters
+# ---- TREATMENT X GENUS ----
+## Data prep
+### Post hoc letters
 sigletters.loc.T <- multcomp::cld(hsd.Treatment$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
 
-# Make order match with summary dataframe
+### Make order match with summary dataframe
 sigletters.loc.T <- sigletters.loc.T[order(sigletters.loc.T$Treatment),]
 sigletters.loc.T <- sigletters.loc.T %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
 
-# Merge sig.letter dataframe into the summary dataframe
+### Merge sig.letter dataframe into the summary dataframe
 df2.Treatment <- df2.Treatment[order(df2.Treatment$Treatment),]
 df3.Treatment.fig <- cbind(df2.Treatment, siglet.loc = sigletters.loc.T$.group)
 
-# Plot
+### Merge CLD (hard coral) with Genus data
+df3.TreatmentxGenus.fig <- merge(df2.Genus.Treatment.nd, df3.Treatment.fig, by = 'Treatment')
+df3.TreatmentxGenus.fig <- select(df3.TreatmentxGenus.fig, -c(4,5))
+names(df3.TreatmentxGenus.fig) <- c('Treatment', 'Genus.o', 'Recruits.M2', 'Recruits.M2.tot', 'n' ,'se', 'siglet')
+
+### Remove double data
+df3.TreatmentxGenus.fig$Recruits.M2.tot <- as.numeric(ifelse(
+  df3.TreatmentxGenus.fig$Genus.o  != 'Porites', "", df3.TreatmentxGenus.fig$Recruits.M2.tot))
+df3.TreatmentxGenus.fig$se <- as.numeric(ifelse(
+  df3.TreatmentxGenus.fig$Genus.o  != 'Porites', "", df3.TreatmentxGenus.fig$se))
+df3.TreatmentxGenus.fig$n <- as.numeric(ifelse(
+  df3.TreatmentxGenus.fig$Genus.o  != 'Porites', "", df3.TreatmentxGenus.fig$n))
+df3.TreatmentxGenus.fig$siglet <- ifelse(
+  df3.TreatmentxGenus.fig$Genus.o  != 'Porites', "", df3.TreatmentxGenus.fig$siglet)
+
+df3.TreatmentxGenus.fig$Genus.o <- factor(df3.TreatmentxGenus.fig$Genus.o,  levels=c("Acropora", "Pocillopora", "Stylophora", "Porites",  "Alveopora", "Coscinaraea", "Echinopora", "Goniopora", "MERULINIDAE", "Millepora", "Other"))
+
+## Plot
+### Legend
+# Create dataframe for legend    
+dt <- data.table(x = 1, y = seq(1, 11, 1), z = factor(1:11))
+dt[ , grp := cut(as.numeric(z), breaks = c(0,7,8,11),
+                labels = c("Other", "Mixed", "Branching"))]
+dt2 <- dt[ , .(x = 1, y = min(y), yend = max(y), ymid = mean(y)), by = grp]
+dt3 <- data.table(x = 1, y = unlist(dt2[ , .(y, yend)]))
+v <- 0.3 # offset
+
+### Plot legend
+p2 <- ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(data = dt, size = 5)+
+  geom_segment(data = dt2, aes(x = x + v, xend = x + v, yend = yend), colour = c("black"), size = 1)+
+  geom_segment(data = dt3, aes(x = x + v, xend = x + (v - 0.1), yend = y), size = 1, 
+    colour=c("black"))+
+  geom_text(data = dt2, aes(x = x + v + 0.4, y = ymid, label = grp), colour = c( "black"), size = 4, fontface = "bold", vjust = 0.3)+
+  scale_color_manual(values = "", guide = "none") +
+  scale_x_continuous(limits = c(1.2, 2))+
+  theme_void()+
+  theme(plot.margin = unit(c(-0.7, 0.5, -0.2, -0.5), "cm"),
+        panel.background = element_rect(fill = "white", colour = NA),
+      plot.background = element_rect(fill = "white", colour = NA))
+
+### Plot stacked
+Recruits.TreatxGenus <- ggplot(df3.TreatmentxGenus.fig) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Treatment, y = Recruits.M2, fill = Genus.o))+
+  geom_errorbar(aes(x = Treatment, ymin=Recruits.M2.tot, ymax=Recruits.M2.tot+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  geom_text(data = df3.TreatmentxGenus.fig, aes(x=Treatment, y = Recruits.M2.tot + (1*se), label = siglet), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  geom_bar(data=df3.TreatmentxGenus.fig[(df3.TreatmentxGenus.fig$Genus.o=="Porites"),],
+           stat = "identity", aes(x = Treatment, y = Recruits.M2.tot, fill=Genus.o), alpha=0, size=1, color="black")+
+  scale_fill_manual("Genus.o", values = c("#ffb55a", "#c86558", "#bd7ebe",
+                                          "#ffee65",
+                    "#6CD2CA", "#D6FEB5", "#beb9db", "#A9E2F3", "#19b0fc", "#fd7f6f", "#a4a2a8"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Recruits (", m^-2,")")), x = "Treatment")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 5.6))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    #strip.text.x = element_text(size = 12, vjust = 2, margin = margin(1.2, 1, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    legend.position = "right",
+    #legend.key.size = unit(1.1, "lines"),
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    ) 
+#ggsave("Recruits_TreatmentxGenus.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+### Combine
+x <- plot_grid(Recruits.TreatxGenus, plot_grid(NULL, p2, NULL, nrow = 3.5, rel_heights = c(1, 3)), rel_widths = c(6, 1))
+cowplot::ggdraw(x) + 
+  theme(plot.background = element_rect(fill="white", color = NA))
+ggsave("Recruits_TreatmentxGenus.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
+
+
+# ---- TREATMENT ----
+## Plot
 ggplot(df3.Treatment.fig, aes(x = Treatment, y = Recruits.M2))+
   geom_bar(stat = "identity", position = position_dodge())+ 
   labs(y = expression(paste("Recruits (", m^-2,")")), x = "Treatment")+
@@ -441,7 +574,7 @@ ggplot(df3.Treatment.fig, aes(x = Treatment, y = Recruits.M2))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Recruits_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Recruits_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- SUBSTRATE ----
 # Post hoc letters
@@ -453,13 +586,14 @@ sigletters.loc.S <- sigletters.loc.S %>% dplyr::mutate(.group = str_squish(.grou
 
 # Merge sig.letter dataframe into the summary dataframe
 df2.Substrate.patch.avg <- df2.Substrate.patch.avg[order(df2.Substrate.patch.avg$Substrate),]
+df2.Substrate.patch.avg <- subset(df2.Substrate.patch.avg, Substrate != "Plate" & Substrate != "Coral")
 df3.Substrate.fig <- cbind(df2.Substrate.patch.avg, siglet.loc = sigletters.loc.S$.group)
 
 # Plot
 ggplot(df3.Substrate.fig, aes(x = Substrate, y = Recruits.M2))+
   geom_bar(stat = "identity", position = position_dodge())+ 
   labs(y = expression(paste("Recruits (", m^-2,")")), x = "Substrate")+
-  scale_y_continuous(limits = c (0, 46), expand = c(0,0))+
+  scale_y_continuous(limits = c (0, 11), expand = c(0,0))+
   geom_errorbar(aes(ymin=Recruits.M2-(1*se), ymax=Recruits.M2+(1*se)), width=.2, position=position_dodge(.9))+
   geom_text(data = df3.Substrate.fig, aes(x=Substrate, y = Recruits.M2 + (1*se), label = siglet.loc), 
             vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
@@ -479,7 +613,7 @@ ggplot(df3.Substrate.fig, aes(x = Substrate, y = Recruits.M2))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Recruits_Substrate.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Recruits_Substrate.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- ORIENTATION ----
 # Post hoc letters
@@ -517,7 +651,7 @@ ggplot(df3.Orientation.fig, aes(x = Orientation, y = Recruits.M2))+
     panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     )
-ggsave("Recruits_Orientation.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Recruits_Orientation.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 #---- GENUS ----
 
@@ -539,14 +673,15 @@ ggplot(df2.Genus.abu.reef, aes(fill=Reef.type, y=Recruits.M2, x=reorder(Genus.o,
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Recruits_Reeftype.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Recruits_Reeftype.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
 
-# Genus X Orientation
-ggplot(df2.GenusxOrientation, aes(fill=Orientation, y=Recruits.M2AR, x=reorder(Genus.o, -Recruits.pct))) + 
+# Genus X Orientation (based on density)
+df2.GenusxOrientation$Orientation <- factor(df2.GenusxOrientation$Orientation, levels = rev(levels(df2.GenusxOrientation$Orientation)))
+ggplot(df2.GenusxOrientation, aes(fill=Orientation, y=sum, x=reorder(Genus.o, -Counts))) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#b3dcff", "#90b2ce"))+
-    labs(y = "Recruits (F)", x = "Genus", fill = "Orientation")+
-    scale_y_continuous(expand = c(0,0))+
+    scale_fill_manual(values = c("#90b2ce", "#b3dcff"))+
+    labs(y = "Recruits", x = "Genus", fill = "Orientation")+
+    scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
     theme(
       axis.title.x = element_text(color="black", vjust=-2, size = 14),
@@ -561,25 +696,96 @@ ggplot(df2.GenusxOrientation, aes(fill=Orientation, y=Recruits.M2AR, x=reorder(G
       )
 ggsave("Recruits_GenusxOrientation.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
 
-# Genus X Substrate
-ggplot(df2.GenusxSubstrate, aes(fill=Substrate, y=Recruits.M2AR, x=reorder(Genus.o, -Recruits.pct))) + 
-    geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#bdcebe", "#eca1a6", "#d6cbd3", "#fefbd8", "#b2b2b2", "#7a3b2e", "#d4ac6e"))+
-    labs(y = "Recruits (F)", x = "Genus", fill = "Substrate")+
-    scale_y_continuous(expand = c(0,0))+
-    theme_economist()+
-    theme(
-      axis.title.x = element_text(color="black", vjust=-2, size = 14),
-      axis.text.x=element_text(size=12, face = "bold.italic", vjust=0.5, angle = -35, hjust=0),
-      axis.title.y = element_text(color="black" , vjust=4, size = 14),
-      axis.text.y=element_text(size=12, face = "bold", vjust=0.5),
-      plot.margin = unit(c(0.5,3.5,0.5,0.5), "cm"),
-      panel.background = element_rect(fill = "#FCFCFC"),
-      plot.background = element_rect(fill = "#FFFFFF"),
-      panel.grid.major = element_line(colour = "#797979", size = 0.3),
-      axis.ticks.length = unit(0.15, "cm")
-      )
-ggsave("Recruits_GenusxSubstrate.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+## Genus x Substrate
+### Create data frame
+df2.GenusxSubstrate <- subset(df2.Substrate.genus.avg, Substrate != "Plate" & Substrate != "Coral")
+
+### Merge CLD (hard coral) with Genus data
+df2.GenusxSubstrate <- merge(df2.GenusxSubstrate, df3.Substrate.fig, by = 'Substrate')
+
+### Remove double data
+df2.GenusxSubstrate$Recruits.M2 <- as.numeric(ifelse(
+  df2.GenusxSubstrate$Genus.o  != 'Porites', "", df2.GenusxSubstrate$Recruits.M2))
+df2.GenusxSubstrate$se <- as.numeric(ifelse(
+  df2.GenusxSubstrate$Genus.o  != 'Porites', "", df2.GenusxSubstrate$se))
+df2.GenusxSubstrate$n <- as.numeric(ifelse(
+  df2.GenusxSubstrate$Genus.o  != 'Porites', "", df2.GenusxSubstrate$n))
+df2.GenusxSubstrate$siglet.loc <- ifelse(
+  df2.GenusxSubstrate$Genus.o  != 'Porites', "", df2.GenusxSubstrate$siglet.loc)
+
+# Set genera
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Dipsastraea"] <- "MERULINIDAE"
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Favites"] <- "MERULINIDAE"
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Unknown"] <- "Other"
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Galaxea"] <- "Other"
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Hydnophora"] <- "Other"
+df2.GenusxSubstrate$Genus.o[df2.GenusxSubstrate$Genus.o == "Pavona"] <- "Other"
+df2.GenusxSubstrate$Genus.o <- factor(df2.GenusxSubstrate$Genus.o,  levels=c("Acropora", "Pocillopora", "Stylophora", "Porites", "Coscinaraea", "Echinopora","Goniopora", "MERULINIDAE", "Millepora", "Other"))
+
+### Legend
+# Create dataframe for legend    
+dt <- data.table(x = 1, y = seq(1, 10, 1), z = factor(1:10))
+dt[ , grp := cut(as.numeric(z), breaks = c(0,6,7,10),
+                labels = c("Other", "Mixed", "Branching"))]
+dt2 <- dt[ , .(x = 1, y = min(y), yend = max(y), ymid = mean(y)), by = grp]
+dt3 <- data.table(x = 1, y = unlist(dt2[ , .(y, yend)]))
+v <- 0.3 # offset
+
+### Plot legend
+p2 <- ggplot(mapping = aes(x = x, y = y)) +
+  geom_point(data = dt, size = 5)+
+  geom_segment(data = dt2, aes(x = x + v, xend = x + v, yend = yend), colour = c("black"), size = 1)+
+  geom_segment(data = dt3, aes(x = x + v, xend = x + (v - 0.1), yend = y), size = 1, 
+    colour=c("black"))+
+  geom_text(data = dt2, aes(x = x + v + 0.4, y = ymid, label = grp), colour = c( "black"), size = 4, fontface = "bold", vjust = 0.3)+
+  scale_color_manual(values = "", guide = "none") +
+  scale_x_continuous(limits = c(1.2, 2))+
+  theme_void()+
+  theme(plot.margin = unit(c(-0.7, 0.5, -0.2, -0.5), "cm"),
+        panel.background = element_rect(fill = "white", colour = NA),
+      plot.background = element_rect(fill = "white", colour = NA))
+
+# Genus X Substrate plot
+Recruits.SubstratexGenus <- ggplot(df2.GenusxSubstrate) +  
+  geom_bar(position = "stack", stat = "identity", aes(x = Substrate, y = Recruits.M2AR, fill = Genus.o))+
+  geom_errorbar(aes(x = Substrate, ymin=Recruits.M2, ymax=Recruits.M2+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
+  geom_text(data = df2.GenusxSubstrate, aes(x=Substrate, y = Recruits.M2 + (1*se), label = siglet.loc), 
+            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+ geom_bar(data=df2.GenusxSubstrate[(df2.GenusxSubstrate$Genus.o=="Porites"),],
+           stat = "identity", aes(x = Substrate, y = Recruits.M2, fill=Genus.o), alpha=0, size=1, color="black")+
+  scale_fill_manual("Genus.o", values = c("#ffb55a", "#c86558", "#bd7ebe",
+                                          "#ffee65",
+                    "#D6FEB5", "#beb9db", "#A9E2F3", "#19b0fc", "#fd7f6f", "#a4a2a8"))+
+  theme_economist()+scale_colour_economist()+
+  labs(y = expression(paste("Recruits (", m^-2,")")), x = "Substrate")+
+  guides(fill=guide_legend(title="Genus"))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0,9))+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    #strip.text.x = element_text(size = 12, vjust = 2, margin = margin(1.2, 1, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    legend.position = "right",
+    #legend.key.size = unit(1.1, "lines"),
+    legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
+    legend.text = element_text(size = 11, face = "italic"),
+    axis.title.x = element_text(size = 14, vjust = -2),
+    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Recruits_GenusxSubstrate.tiff", width = 23, height = 12, units = "cm", dpi=1200, compression = "lzw")
+
+### Combine
+x <- plot_grid(Recruits.SubstratexGenus, plot_grid(NULL, p2, NULL, nrow = 3.5, rel_heights = c(1, 2.5)), rel_widths = c(6, 1))
+cowplot::ggdraw(x) + 
+  theme(plot.background = element_rect(fill="white", color = NA))
+ggsave("Recruits_GenusxSubstrate.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
+
 
 ```
 

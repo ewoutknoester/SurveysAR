@@ -5,8 +5,7 @@ date: "12/08/2022"
 output: html_document
 ---
 
-#TODO: check & deal with outlier HC model
-
+# Setup
 ```{r setup, include=FALSE}
 
 rm(list=ls()) # Clear workspace
@@ -17,6 +16,7 @@ library(car) # Anovas
 library(cowplot) # Plot grid
 library(data.table)
 library(emmeans) # Pairwise comparisons
+library(ggpubr) # ggarrange
 library(flextable) # Layout word table
 library(ggthemes) # pretty plots
 library(NCmisc) # Check packages used
@@ -406,31 +406,11 @@ df3.O.genus.avg$n.tot <- df3.O.genus.count$n.tot
 df3.O.genus.avg$Cover <- df3.O.genus.avg$n/ df3.O.genus.avg$n.tot * 100
 
 ```
-
-# Data exploration
-```{r data exploration}
-
-# Hard coral
-hist(df3.BC.hc$Cover)
-
-# Soft coral
-hist(df3.BC.sc$Cover)
-
-# Macroalgae
-hist(df3.BC.ma$Cover)
-
-# Hard substrate
-hist(df3.BC.hs$Cover)
-
-# Soft substrate
-hist(df3.BC.ss$Cover)
-
-```
-
 # Model
 ```{r AVG survival: betareg model selection}
 
 # ---- Hard coral ----
+# Per Treatment
 ## Create dataset
 df3.BC.hc.mod <- as.data.frame(df3.BC.hc)
 
@@ -442,22 +422,37 @@ df3.BC.hc.mod<- df3.BC.hc.mod %>%
   mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
 
 ## Model
-HC.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hc.mod)
+HC.bm1 <- betareg(Cover ~ Treatment, data = df3.BC.hc.mod)
 
 ### Allowing for variable precision
-HC.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.hc.mod)
-HC.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.hc.mod)
-HC.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hc.mod)
+HC.bm1b <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.hc.mod)
+HC.bm1c <- betareg(Cover ~ Treatment | Location, data = df3.BC.hc.mod)
+HC.bm1d <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hc.mod)
 
 AIC(HC.bm1, HC.bm1b, HC.bm1c, HC.bm1d)
 
 ## Model selection fixed part
-HC.bm2T <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hc.mod)
-HC.bm2TL <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hc.mod)
+HC.bm2T <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.hc.mod)
+HC.bm2TL <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hc.mod)
 
 AIC(HC.bm2T, HC.bm2TL) # Location does not add much, better left out
 
 car::Anova(HC.bm2T)
+
+# Per Year
+df3.BC.years.mod <- as.data.frame(subset(df3.BC.years, Substrate == "Hard coral"))
+df3.BC.years.mod$Year <- as.factor(df3.BC.years.mod$Year)
+
+## Transform survival (%) into fraction
+df3.BC.years.mod <- df3.BC.years.mod %>% mutate(Cover = Cover/100)
+
+## Re-scale so there are no 0 and 1 in the dataset
+df3.BC.years.mod <- df3.BC.years.mod %>% 
+  mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
+
+## Model
+HCY.bm1 <- betareg(Cover ~ Treatment*Year, data = df3.BC.years.mod)
+car::Anova(HCY.bm1)
 
 # ---- Soft coral ----
 ## Create dataset
@@ -471,12 +466,12 @@ df3.BC.sc.mod<- df3.BC.sc.mod %>%
   mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
 
 ## Betareg full model
-SC.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hc.mod) # Variable precision did not improve residuals
+SC.bm1 <- betareg(Cover ~ Treatment, data = df3.BC.hc.mod) # Variable precision did not improve residuals
 
 ### Allowing for variable precision (choices based on residual plots)
-SC.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.sc.mod)
-SC.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.sc.mod)
-SC.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.sc.mod)
+SC.bm1b <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.sc.mod)
+SC.bm1c <- betareg(Cover ~ Treatment | Location, data = df3.BC.sc.mod)
+SC.bm1d <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.sc.mod)
 
 AIC(SC.bm1, SC.bm1b, SC.bm1c, SC.bm1d) # Location does not add much, better left out
 
@@ -494,12 +489,12 @@ df3.BC.ma.mod<- df3.BC.ma.mod %>%
   mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
 
 ## Betareg full model
-MA.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.ma.mod) # Variable precision did not improve residuals
+MA.bm1 <- betareg(Cover ~ Treatment, data = df3.BC.ma.mod) # Variable precision did not improve residuals
 
 ### Allowing for variable precision (choices based on residual plots)
-MA.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.ma.mod)
-MA.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.ma.mod)
-MA.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.ma.mod)
+MA.bm1b <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.ma.mod)
+MA.bm1c <- betareg(Cover ~ Treatment | Location, data = df3.BC.ma.mod)
+MA.bm1d <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.ma.mod)
 
 AIC(MA.bm1, MA.bm1b, MA.bm1c, MA.bm1d) # Location does not add much, better left out
 
@@ -517,12 +512,12 @@ df3.BC.hs.mod<- df3.BC.hs.mod %>%
   mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
 
 ## Betareg full model
-HS.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.hs.mod) # Variable precision did not improve residuals
+HS.bm1 <- betareg(Cover ~ Treatment, data = df3.BC.hs.mod) # Variable precision did not improve residuals
 
 ### Allowing for variable precision (choices based on residual plots)
-HS.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.hs.mod)
-HS.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.hs.mod)
-HS.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.hs.mod)
+HS.bm1b <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.hs.mod)
+HS.bm1c <- betareg(Cover ~ Treatment | Location, data = df3.BC.hs.mod)
+HS.bm1d <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hs.mod)
 
 AIC(HS.bm1, HS.bm1b, HS.bm1c, HS.bm1d) # Location does not add much, better left out
 
@@ -540,12 +535,12 @@ df3.BC.ss.mod<- df3.BC.ss.mod %>%
   mutate(Cover = (Cover * (length(Cover) - 1) + 0.5) / length(Cover))
 
 ## Betareg full model
-SS.bm1 <- betareg(Cover ~ Treatment*Location, data = df3.BC.ss.mod) # Variable precision did not improve residuals
+SS.bm1 <- betareg(Cover ~ Treatment, data = df3.BC.ss.mod) # Variable precision did not improve residuals
 
 ### Allowing for variable precision (choices based on residual plots)
-SS.bm1b <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.ss.mod)
-SS.bm1c <- betareg(Cover ~ Treatment*Location | Location, data = df3.BC.ss.mod)
-SS.bm1d <- betareg(Cover ~ Treatment*Location | Treatment*Location, data = df3.BC.ss.mod)
+SS.bm1b <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.ss.mod)
+SS.bm1c <- betareg(Cover ~ Treatment | Location, data = df3.BC.ss.mod)
+SS.bm1d <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.ss.mod)
 
 AIC(SS.bm1, SS.bm1b, SS.bm1c, SS.bm1d) # Location does not add much, better left out
 
@@ -873,10 +868,10 @@ ggplot(df3.BC.ss.fig, aes(x = Treatment, y = Cover))+
 # Plots
 ```{r plots}
 
-# Treatments in 2022
-ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) + 
+# Treatments in 2021
+BC2021plot <- ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#9e9e9e", "#0d6936", "#f5e298", "#db781b"),
+    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#a4a2a8", "#b2e061", "#ffee65", "#ffb55a"),
                       labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
     scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
     labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
@@ -896,20 +891,20 @@ ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) +
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Benthic cover_Benthic cover 2022.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic cover_Benthic cover 2022.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 # Treatments in 2020
-ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) + 
+BC2020plot <- ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#9e9e9e", "#0d6936", "#f5e298", "#db781b"),
+    scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#a4a2a8", "#b2e061", "#ffee65", "#ffb55a"),
                       labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
     scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
     labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
     scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
     theme(
-      axis.title.x = element_text(color="black", vjust=-3, size = 14),
-      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.x = element_blank(),
+      axis.text.x=element_blank(),
       axis.title.y = element_text(color="black" , vjust=0, size = 14),
       axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
       legend.position = "right",
@@ -921,7 +916,7 @@ ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) +
       panel.grid.major = element_line(colour = "#797979", size = 0.3),
       axis.ticks.length = unit(0.15, "cm")
       )
-ggsave("Benthic cover_Benthic cover 2020.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
+#ggsave("Benthic cover_Benthic cover 2020.tiff", width = 18, height = 8, units = "cm", dpi=1200, compression = "lzw")
 
 
 # HARD CORAL BY GENUS
@@ -944,7 +939,9 @@ p2 <- ggplot(mapping = aes(x = x, y = y)) +
   scale_color_manual(values = "", guide = "none") +
   scale_x_continuous(limits = c(1.2, 2))+
   theme_void()+
-  theme(plot.margin = unit(c(-0.5, 0.5, 0, -0.5), "cm"))
+  theme(plot.margin = unit(c(-0.5, 0.5, 0, -0.5), "cm"),
+        panel.background = element_rect(fill = "white", colour = NA),
+      plot.background = element_rect(fill = "white", colour = NA))
 
 # Merge CLD (hard coral) with Genus data
 df3.HC.sum <- merge(df3.HC.genus.avg, df3.BC.hc.fig, by = 'Treatment')
@@ -964,8 +961,8 @@ HC.SE <- ggplot(df3.HC.sum) +
             vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
   geom_bar(data=df3.HC.sum[(df3.HC.sum$Genus.o=="Porites"),],
            stat = "identity", aes(x = Treatment, y = Cover.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  scale_fill_manual("Genus.o", values = c("#FF930B", "#860000", "#FFFF6F", "#9F0AB1",
-                    "#503287", "#7496BD", "#19b0fc", "#A9E2F3", "#92FE96", "#21b54b", "#D6FEB5", "#D0D0D0"))+
+  scale_fill_manual("Genus.o", values = c("#ffb55a", "#c86558", "#ffee65","#bd7ebe",
+                    "#BF4E74", "#beb9db", "#19b0fc", "#A9E2F3", "#b2e061", "#21b54b", "#FFFFAD", "#a4a2a8"))+
   theme_economist()+scale_colour_economist()+
   labs(y = "Hard coral cover (%)", x = "Treatment")+
   guides(fill=guide_legend(title="Genus"))+
@@ -985,13 +982,14 @@ HC.SE <- ggplot(df3.HC.sum) +
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),
-    panel.grid.major = element_line(colour = "#FFFFFF", size = 1),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
     axis.ticks = element_blank()
     ) 
 
-plot_grid(HC.SE, plot_grid(NULL, p2, NULL, nrow = 3, rel_heights = c(1, 4.5)), rel_widths = c(6, 1))
-ggsave("Coral x Genus by Treatment.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
-
+x <- plot_grid(HC.SE, plot_grid(NULL, p2, NULL, nrow = 3, rel_heights = c(1, 4.5)), rel_widths = c(6, 1))
+cowplot::ggdraw(x) + 
+  theme(plot.background = element_rect(fill="white", color = NA))
+ggsave("Benthic cover_Coral x Genus by Treatment.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
 
 ```
 
@@ -1084,6 +1082,28 @@ add.table(doc, df3.ALL.genus.avg)
 base::print(doc, target="Benthic cover_Other benthic groups.docx")
 
 ```
+# Figure compilation
+```{r compilation}
+
+comparer <- ggarrange(BC2020plot, BC2021plot, nrow = 2, align = "v",
+                 labels = c("A (2020)", "B (2022)"), heights = c(1, 1.2), hjust = -1.3, vjust = 2.5, 
+                 font.label = list(size = 18, face = "bold"), common.legend = T, legend = "right")
+cowplot::ggdraw(comparer) + 
+  theme(plot.background = element_rect(fill="white", color = NA))
+ggsave("Benthic cover_Benthic cover_2020-2022.tiff", width = 18, height = 16, units = "cm", dpi=1200,
+       compression = "lzw", comparer)
+
+```
+# Export for correlations
+```{r export}
+
+HC <- subset(df3.BC.hc.mod, Year == 2022)
+write_xlsx(HC, "Structural complexity_Benthic cover_2022-08_Hard coral per patch.xlsx")
+
+```
+
+
+
 
 
 
