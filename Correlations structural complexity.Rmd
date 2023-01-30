@@ -86,6 +86,13 @@ cors$sum <- paste("r = ", cors$r, cors$star, sep = "")
 co <- c("#B0E54D", "#6FDCD9", "#F0C862", "#EC86BF") # Colour palette ,"#D04E08", "#0673B0"
 Mar <- c(15,0,15,0) # Plot margins
 
+Averages.selection$Treatment <- ifelse(Averages.selection$Treatment == "BRU", "Bottle",
+                                ifelse(Averages.selection$Treatment == "Cage", "Cage",       
+                                ifelse(Averages.selection$Treatment == "Cake", "Cake",       
+                                ifelse(Averages.selection$Treatment == "Comp", "Compound",       
+                                ifelse(Averages.selection$Treatment == "Ref (-)", "Control",       
+                                ifelse(Averages.selection$Treatment == "Ref (+)", "Reference", "Other"))))))
+
 S <- ggplot(Averages.selection, aes(x = Cover, y = S))+
   geom_point(aes(colour = Treatment), size = 6)+
   scale_color_manual(values = co)+

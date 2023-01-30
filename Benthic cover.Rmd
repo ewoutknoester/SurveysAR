@@ -189,6 +189,9 @@ df2.selex$Treatment <- as.factor(df2.selex$Treatment)
 df2.selex$Group <- ifelse(grepl("dead", df2.selex$State, ignore.case = TRUE), "Bare.rock", df2.selex$Group)
 df2.selex$Super.group <- ifelse(grepl("dead", df2.selex$State, ignore.case = TRUE), "Bare substrate", df2.selex$Super.group)
 
+## Include Millepora with functional hard corals
+df2.selex$Group <- ifelse(grepl("Millepora", df2.selex$Genus, ignore.case = TRUE), "Hard.coral", df2.selex$Group)
+
 ## Set groups
 df2.selex$Super.group <- ifelse(df2.selex$Group  == "Algae", "Macroalgae", df2.selex$Super.group)
 df2.selex$Super.group <- ifelse(df2.selex$Group  == "Bare.rock", "Hard substrate", df2.selex$Super.group)
@@ -327,7 +330,7 @@ df3.HC.genus.avg <- df3.HC.genus.avg %>%
 df3.HC.genus.avg$Genus.o[df3.HC.genus.avg$Genus.o == "Favia"] <- "Dipsastraea"
 
 # Set order of genera
-df3.HC.genus.avg$Genus.o <- factor(df3.HC.genus.avg$Genus.o,  levels=c("Acropora", "Pocillopora", "Porites", "Stylophora",   "Dipsastraea", "Echinopora", "Favites", "Galaxea", "Goniastrea", "Hydnophora", "Porites (massive)", "Other"))
+df3.HC.genus.avg$Genus.o <- factor(df3.HC.genus.avg$Genus.o,  levels=c("Acropora", "Millepora", "Pocillopora", "Porites", "Stylophora",   "Dipsastraea", "Echinopora", "Favites", "Galaxea", "Goniastrea", "Hydnophora", "Porites (massive)", "Other"))
 
 # ---- OTHERS BY GENUS ----
 ## SOFT CORAL
@@ -433,7 +436,7 @@ AIC(HC.bm1, HC.bm1b, HC.bm1c, HC.bm1d)
 
 ## Model selection fixed part
 HC.bm2T <- betareg(Cover ~ Treatment | Treatment, data = df3.BC.hc.mod)
-HC.bm2TL <- betareg(Cover ~ Treatment | Treatment*Location, data = df3.BC.hc.mod)
+HC.bm2TL <- betareg(Cover ~ Treatment*Location | Treatment, data = df3.BC.hc.mod)
 
 AIC(HC.bm2T, HC.bm2TL) # Location does not add much, better left out
 
@@ -873,13 +876,13 @@ BC2021plot <- ggplot(df3.BC.22, aes(fill=Substrate, y=Cover, x=Treatment)) +
     geom_bar(position="fill", stat="identity")+
     scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#a4a2a8", "#b2e061", "#ffee65", "#ffb55a"),
                       labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
-    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+    scale_x_discrete(labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
     labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
     scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
     theme(
-      axis.title.x = element_text(color="black", vjust=-3, size = 14),
-      axis.text.x=element_text(size=12, face = "bold"),
+      axis.title.x = element_text(color="black", vjust=-3, size = 13),
+      axis.text.x=element_text(size=11, face = "bold"),
       axis.title.y = element_text(color="black" , vjust=0, size = 14),
       axis.text.y=element_text(size=12, face = "bold", vjust=0.5, hjust = 1.5),
       legend.position = "right",
@@ -898,7 +901,7 @@ BC2020plot <- ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) +
     geom_bar(position="fill", stat="identity")+
     scale_fill_manual(values = c("#e6e6e6", "#bfbfbf", "#a4a2a8", "#b2e061", "#ffee65", "#ffb55a"),
                       labels = c("Soft", "Hard", "Other", "Macroalgae", "Soft coral", "Hard coral"))+
-    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+    scale_x_discrete(labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
     labs(y = "Benthic cover", x = "Treatment", fill = "Substrate")+
     scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
@@ -922,8 +925,8 @@ BC2020plot <- ggplot(df3.BC.20, aes(fill=Substrate, y=Cover, x=Treatment)) +
 # HARD CORAL BY GENUS
 ## Legend
 # Create dataframe for legend    
-dt <- data.table(x = 1, y = seq(1, 12, 1), z = factor(1:12))
-dt[ , grp := cut(as.numeric(z), breaks = c(0,8,12),
+dt <- data.table(x = 1, y = seq(1, 13, 1), z = factor(1:13))
+dt[ , grp := cut(as.numeric(z), breaks = c(0,8,13),
                 labels = c("Other", "Branching"))]
 dt2 <- dt[ , .(x = 1, y = min(y), yend = max(y), ymid = mean(y)), by = grp]
 dt3 <- data.table(x = 1, y = unlist(dt2[ , .(y, yend)]))
@@ -939,7 +942,7 @@ p2 <- ggplot(mapping = aes(x = x, y = y)) +
   scale_color_manual(values = "", guide = "none") +
   scale_x_continuous(limits = c(1.2, 2))+
   theme_void()+
-  theme(plot.margin = unit(c(-0.5, 0.5, 0, -0.5), "cm"),
+  theme(plot.margin = unit(c(-0.8, 0.5, -0.25, -0.5), "cm"),
         panel.background = element_rect(fill = "white", colour = NA),
       plot.background = element_rect(fill = "white", colour = NA))
 
@@ -961,12 +964,12 @@ HC.SE <- ggplot(df3.HC.sum) +
             vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
   geom_bar(data=df3.HC.sum[(df3.HC.sum$Genus.o=="Porites"),],
            stat = "identity", aes(x = Treatment, y = Cover.tot, fill=Genus.o), alpha=0, size=1, color="black")+
-  scale_fill_manual("Genus.o", values = c("#ffb55a", "#c86558", "#ffee65","#bd7ebe",
+  scale_fill_manual("Genus.o", values = c("#ffb55a", "#ff7a66", "#b85040", "#ffee65","#bd7ebe",
                     "#BF4E74", "#beb9db", "#19b0fc", "#A9E2F3", "#b2e061", "#21b54b", "#FFFFAD", "#a4a2a8"))+
   theme_economist()+scale_colour_economist()+
   labs(y = "Hard coral cover (%)", x = "Treatment")+
   guides(fill=guide_legend(title="Genus"))+
-  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
   scale_y_continuous(expand = c(0, 0), limits = c(0, 42))+
   theme(
     panel.margin.y = unit(0, "cm"),
@@ -976,9 +979,9 @@ HC.SE <- ggplot(df3.HC.sum) +
     #legend.key.size = unit(1.1, "lines"),
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
-    axis.title.y = element_text( size = 14, vjust = 3),
+    axis.title.x = element_text(size = 12, vjust = -2),
+    axis.text.x = element_text(size = 10, face = "bold", vjust = 0.5),
+    axis.title.y = element_text( size = 13, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
     plot.background = element_rect(fill = "#FFFFFF"),

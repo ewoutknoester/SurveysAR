@@ -103,6 +103,7 @@ df2.surv.nd <- df2.surv[df2.surv$Structure != "DISK", ]
 # Overall survival
 Total.fragments.nd <- as.numeric(nrow(df2.surv.nd))
 Overall.survival.nd <- sum(df2.surv.nd$Survival)/ Total.fragments.nd * 100
+Overall.survival.nd.min <- (sum(df2.surv.nd$Survival)/ (640*8))*100
 Overall.condition.nd.all <- mean(df2.surv.nd$Condition)
 Overall.condition.nd.alive <- mean(df2.surv.nd$Condition[df2.surv.nd$Condition > 0])
 
@@ -112,22 +113,41 @@ df3.Structure  <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c
 df3.Structure <- data_summary(df3.Structure, varname = "Survival", groupnames = c("Treatment" ,"Patch", "Structure"))
 df3.Structure.avg <- data_summary(df3.Structure, varname = "Survival", groupnames = c("Structure"))
 
+## Average over genera
+df3.Genus  <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Genus", "Patch"))
+df3.Genus.avg <- data_summary(df3.Genus, varname = "Survival", groupnames = c("Genus"))
+
 # Survival per Patch (not averaged per Structure first, so relative size differences of AR types are taken into account)
-df3.Patch <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Treatment" ,"Patch"))
+df2.surv.nd$Genus[df2.surv.nd$Genus == "Isopora"] <- "Acropora"
+df3.Patch <- subset(df2.surv.nd, Genus == "Acropora")
+df3.Patch <- data_summary(df3.Patch, varname = "Survival", groupnames = c("Treatment" ,"Patch"))
 
 # Survival per Treatment (averaged per Patch, assuming each patch had roughly equal number of start fragments)
 df3.Treatment <- data_summary(df3.Patch, varname = "Survival", groupnames = c("Treatment"))
 df3.Treatment <- select(df3.Treatment, -c("sd", "sum"))
 
 # Survival by Genus x Structure
-df2.surv.nd$Genus[df2.surv.nd$Genus == "Isopora"] <- "Acropora"
 df3.StructurexGenus <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Structure", "Genus"))
 
 # Survival by Size x Treatment
 df3.SizexTreatment <- data_summary(df2.surv.nd, varname = "Survival", groupnames = c("Size", "Structure"))
 
+# All fragments by Treatment x Genus
+### Get surviving fragments
+df2.surv.nd$Genus <- as.factor(df2.surv.nd$Genus)
+df2.surv.nd$Treatment <- factor(df2.surv.nd$Treatment)
+df2.surv.nd$Patch <- factor(df2.surv.nd$Patch)
+deaval.tot.genusxpatch <- df2.surv.nd %>% group_by(Patch, Genus, .drop = FALSE) %>% tally() 
+deaval.tot.genusxpatch.tot <- df2.surv.nd %>% group_by(Treatment, Patch) %>% tally()
+deaval.tot.genusxpatch <- left_join(deaval.tot.genusxpatch, deaval.tot.genusxpatch.tot,  by = "Patch")
+deaval.tot.genusxpatch$Perc <- deaval.tot.genusxpatch$n.x/deaval.tot.genusxpatch$n.y*100
+deaval.tot.genusxpatch.sum <- data_summary(deaval.tot.genusxpatch, varname = "Perc", groupnames = c("Treatment" ,"Genus"))
+
 # Cause of death
 ## Assuming all missing fragments died, then got lost
+df3.alive.acr <- df2.surv.nd[df2.surv.nd$Survival > 0, ]
+df3.alive.acr <- subset(df3.alive.acr, Genus == "Acropora")
+df3.Alive.Overall <- data_summary(df3.alive.acr, varname = "Survival", groupnames = c("Treatment"))
 df3.death <- df2.surv.nd[df2.surv.nd$Survival == 0, ]
 df3.death$Dead <- 1
 Total.fragments.nd.dead <- as.numeric(nrow(df3.death))
@@ -136,7 +156,8 @@ df3.Dead.Overall <- data_summary(df3.death, varname = "Dead", groupnames = c("Ca
 df3.Dead.Overall$Pct <- df3.Dead.Overall$sum/ Total.fragments.nd.dead * 100
 df3.Dead.Overall <- select(df3.Dead.Overall, c("Cause.death", "n", "Pct"))
 # Cause x Treatment
-df3.Dead.byTreatment <- data_summary(df3.death, varname = "Dead", groupnames = c("Treatment" ,"Cause.death"))
+df3.Dead.byTreatment <- subset(df3.death, Genus == "Acropora")
+df3.Dead.byTreatment <- data_summary(df3.Dead.byTreatment, varname = "Dead", groupnames = c("Treatment" ,"Cause.death"))
 df3.Dead.byTreatment$Pct <- df3.Dead.byTreatment$sum/ Total.fragments.nd.dead * 100
 df3.Dead.byTreatment <- select(df3.Dead.byTreatment, c("Treatment" ,"Cause.death", "n", "Pct"))
 df3.Dead.byTreatment$Cause.death <- factor(df3.Dead.byTreatment$Cause.death, ordered = TRUE, levels = c("Predation cots", "Predation snail", "Coral", "Soft coral", "Sponge", "Tunicate", "Turtle", "Fishing", "Toppled", "Bleaching", "Unknown"))
@@ -186,7 +207,8 @@ bm.T1 <- betareg(Survival ~ Treatment, data = df3.Patch)
 ### Variable precision
 bm.T1b <- betareg(Survival ~ Treatment | Treatment, data = df3.Patch)
 
-car::Anova(bm.T1b) 
+car::Anova(bm.T1b)
+summary(bm.T1b)
 
 # ---- STRUCTURE ----
 ## Using Patch averages instead of individual Structures, because of distribution
@@ -197,7 +219,37 @@ bm.S1 <- betareg(Survival ~ Structure, data = df3.Structure)
 ### Variable precision
 bm.S1b <- betareg(Survival ~ Structure | Treatment, data = df3.Structure)
 
-car::Anova(bm.S1b) 
+car::Anova(bm.S1b)
+
+# ---- GENUS ----
+## Transformation needed, because of exact 0s and 1s
+df3.Genus$Genus[df3.Genus$Genus == "Isopora"] <- "Acropora"
+df3.Genus <- df3.Genus %>% 
+  mutate(Survival = (Survival * (length(Survival) - 1) + 0.5) / length(Survival))
+df3.Genus <- select(df3.Genus, c("Genus", "Survival"))
+df3.Genus$Genus <- as.factor(df3.Genus$Genus)
+
+bm.G <- betareg(Survival ~ Genus, data = df3.Genus)
+
+### Variable precision
+bm.G.g <- betareg(Survival ~ Genus | Genus, data = df3.Genus)
+
+car::Anova(bm.G.g) 
+
+# ---- TREATMENT X GENUS ----
+## Using Patch averages
+## Beta regression (because fraction)
+## Transformation needed, because of exact 0s and 1s
+deaval.tot.genusxpatch$Percentage <- deaval.tot.genusxpatch$Perc/100
+deaval.tot.genusxpatch <- deaval.tot.genusxpatch %>% 
+  mutate(Percentage = (Percentage * (length(Percentage) - 1) + 0.5) / length(Percentage))
+
+bm.TxG <- betareg(Percentage ~ Treatment*Genus, data = deaval.tot.genusxpatch)
+
+### Variable precision
+bm.TxG.txg <- betareg(Percentage ~ Treatment*Genus | Treatment*Genus, data = deaval.tot.genusxpatch)
+
+car::Anova(bm.TxG.txg) 
 
 ```
 
@@ -240,6 +292,31 @@ abline(0,0)
 plot(fitted(mod) ~ df3.Structure$Survival) # response data vs fitted
 par(op)
 
+# GENUS
+mod <- bm.G.g # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(df3.Genus$Genus, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ df3.Genus$Survival) # response data vs fitted
+par(op)
+
+# TREATMENT X GENUS
+mod <- bm.TxG.txg # set model to be validated
+op <- par(mfrow = c(2, 4), mar = c(5, 4, 1, 2)) # set layout of figure frame
+plot(resid(mod, type = "pearson") ~ fitted(mod)) # fitted vs residuals
+abline(0,0)
+hist(resid(mod, type = "pearson"), main = "") # histogram residuals
+qqnorm(resid(mod, type = "pearson")) # QQplot residuals
+plot(deaval.tot.genusxpatch$Treatment, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(deaval.tot.genusxpatch$Genus, resid(mod, type = "pearson")) # residuals split over Treatment
+abline(0,0)
+plot(fitted(mod) ~ deaval.tot.genusxpatch$Percentage) # response data vs fitted
+par(op)
 
 ```
 
@@ -255,6 +332,12 @@ hsd.Treatment <- emmeans(bm.T1b, specs = pairwise ~ Treatment, adjust = "tukey",
 # STRUCTURE
 hsd.Structure <- emmeans(bm.S1b, specs = pairwise ~ Structure, adjust = "tukey", type = "response")
 
+# GENUS
+hsd.Genus <- emmeans(bm.G.g, specs = pairwise ~ Genus, adjust = "tukey", type = "response")
+
+# TREATMENT X GENUS
+hsd.TxG <- emmeans(bm.TxG.txg, specs = pairwise ~ Treatment|Genus, adjust = "tukey", type = "response")
+
 ```
 
 
@@ -262,7 +345,6 @@ hsd.Structure <- emmeans(bm.S1b, specs = pairwise ~ Structure, adjust = "tukey",
 ```{r plot}
 
 # ---- TREATMENT BY DISK ----
-
 # Plot
 ggplot(df3.Treatment.d, aes(x = Treatment, y = Survival))+
   geom_bar(stat = "identity", position = position_dodge())+ 
@@ -286,7 +368,6 @@ ggplot(df3.Treatment.d, aes(x = Treatment, y = Survival))+
     axis.ticks = element_blank()
     )
 #ggsave("Fragment survival_Treatment on Disk.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
-
 
 # ---- TREATMENT ----
 # Post hoc letters
@@ -327,7 +408,6 @@ ggplot(df3.Treatment.fig, aes(x = Treatment, y = Survival))+
 #ggsave("Fragment survival_Treatment.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- STRUCTURE X SIZE ----
-
 # Plot
 ggplot(df3.SizexTreatment, aes(fill = Size, x = Structure, y = Survival))+
   geom_bar(stat = "identity", position = position_dodge())+ 
@@ -355,8 +435,47 @@ ggplot(df3.SizexTreatment, aes(fill = Size, x = Structure, y = Survival))+
 #ggsave("Fragment survival_Structure x Size.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 # ---- STRUCTURE X GENUS ----
+## OUTPLANTED
+### Get CLD
+#### Post hoc letters
+sigletters.TxG <- multcomp::cld(hsd.TxG$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
 
-# Plot
+#### Make order match with summary dataframe
+sigletters.TxG <- sigletters.TxG[order(sigletters.TxG$Treatment),]
+sigletters.TxG <- sigletters.TxG %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+
+#### Merge sig.letter dataframe into the summary dataframe
+deaval.tot.genusxpatch.sum <- deaval.tot.genusxpatch.sum[order(deaval.tot.genusxpatch.sum$Treatment),]
+deaval.tot.genusxpatch.fig <- cbind(deaval.tot.genusxpatch.sum, siglet.loc = sigletters.TxG$.group)
+
+### Plot
+ggplot(deaval.tot.genusxpatch.fig, aes(fill = Treatment, x = Genus, y = Perc))+
+  geom_bar(stat = "identity", position = position_dodge())+ 
+  labs(y = "Fragments outplanted (%)", x = "Treatment")+
+  scale_y_continuous(limits = c (0, 110), expand = c(0,0))+
+  geom_errorbar(aes(ymin=Perc-(1*se), ymax=Perc+(1*se)), width=.2, position=position_dodge(.9))+
+  geom_text(data = deaval.tot.genusxpatch.fig, aes(x=Genus, y = Perc + (1*se), label = siglet.loc), 
+           vjust= -0.8, hjust = 0.5, size = 4, fontface = "bold", position=position_dodge(.9))+
+  scale_x_discrete(expand = c(0, 0.7))+
+  theme_economist()+scale_colour_economist()+
+  theme(
+    panel.margin.y = unit(0, "cm"),
+    strip.text.x = element_text(size = 14, face = "bold", vjust = 2, margin = margin(0.2, 0, 0.1, 0, "cm")),
+    strip.background = element_blank(),
+    axis.title.x = element_text(color="black", vjust=-2, size = 14),
+    axis.text.x = element_text(angle = 0, size=12, face = "bold", vjust=0.5),
+    axis.title.y = element_text(color="black" , vjust=4, size = 14),
+    axis.text.y=element_text(size=12, face = "bold", vjust=0.4),
+    plot.margin = margin(t = 10, r = 40,  b = 25,  l = 20),
+    panel.background = element_rect(fill = "#FCFCFC"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.grid.major = element_line(colour = "#797979", size = 0.3),
+    axis.ticks = element_blank()
+    )
+#ggsave("Fragment survival_Treatment x Genus.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+## SURVIVAL
+### Plot
 ggplot(df3.StructurexGenus, aes(fill = Structure, x = Genus, y = Survival))+
   geom_bar(stat = "identity", position = position_dodge())+ 
   labs(y = "Survival (F)", x = "Structure")+
@@ -472,16 +591,24 @@ deaval <- df3.Treatment.fig
 deaval$Cause.death <- "Alive"
 colnames(deaval)[2] <- "Pct"
 deaval$Pct <- deaval$Pct*100
+df3.Alive.Overall <- select(df3.Alive.Overall, c("Treatment", "sum"))
+deaval <- left_join(deaval, df3.Alive.Overall, by = "Treatment")
 
 ### Get total fragment per Treatment
-deaval.tot <- df2.surv.nd %>% group_by(Treatment) %>% tally()
+deaval.tot <- subset(df2.surv.nd, Genus == "Acropora")
+deaval.tot <- deaval.tot %>% group_by(Treatment) %>% tally()
 colnames(deaval.tot)[2] <- "n.tot"
+
+### Get total fragments per Genus
+deaval.genus.tot <- df2.surv.nd %>% group_by(Genus) %>% tally()
+colnames(deaval.genus.tot)[2] <- "n.tot"
 
 ### Merge
 deaval <- left_join(deaval, deaval.tot)
-deaval$n.tot <- (deaval$n.tot/100)*deaval$Pct
-deaval <- select(deaval, c("Treatment", "Cause.death", "n.tot", "Pct"))
-colnames(deaval)[3] <- "n"
+deaval <- select(deaval, c("Treatment", "Cause.death", "sum", "n.tot", "Pct"))
+names(deaval)[names(deaval) == "sum"] <- "n"
+deaval$Pct <- deaval$n/deaval$n.tot*100
+deaval <- select(deaval, -c("n.tot"))
 deaval <- rbind(deaval, df3.Dead.byTreatment)
 
 ### Reduce number of categories
@@ -513,16 +640,16 @@ deaval.tot.destiny$Pct <- (deaval.tot.destiny$sum/sum(deaval.tot.destiny$sum))*1
 ### Plot
 ggplot(deaval, aes(fill=Cause.death, y=Pct.tot, x=Treatment)) + 
     geom_bar(position="fill", stat="identity")+
-  scale_fill_manual(values = c("#a4a2a8", "#c8d9e5", "#97bad2", "#7492A7", "#d8b4a0",
+  scale_fill_manual(values = c("#a4a2a8", "#97bad2", "#7492A7", "#d8b4a0",
                                  "#d77a61", "#B0E54D"))+
     labs(y = "Fragments", x = "Treatment", fill = "Cause")+
-    scale_x_discrete(labels=c("BRU", "Cage", "Cake", "Comp"))+
+    scale_x_discrete(labels=c("Bottle", "Cage", "Cake", "Compound"))+
     scale_y_continuous(expand = c(0,0), labels = scales::percent)+
     geom_bar(data=deaval[(deaval$Cause.death=="Alive"),],
       stat = "identity", aes(x = Treatment, y = Pct.tot), alpha=0, size=1, color="black")+
    geom_errorbar(data=deaval[(deaval$Cause.death=="Alive"),], aes(x = Treatment, ymin=Pct.tot - se,
                  ymax=Pct.tot + se), width=.1, size = 0.6)+
-   geom_text(data=deaval[(deaval$Cause.death=="Alive"),], aes(x=Treatment, y = Pct.tot - (1.8*se), 
+   geom_text(data=deaval[(deaval$Cause.death=="Alive"),], aes(x=Treatment, y = Pct.tot - se - 0.04, 
             label = siglet.loc), size = 5, fontface = "bold")+
     theme_economist()+
     theme(
@@ -539,19 +666,23 @@ ggplot(deaval, aes(fill=Cause.death, y=Pct.tot, x=Treatment)) +
       axis.ticks.length = unit(0.15, "cm"),
       legend.position = "right"
       )
-ggsave("Fragments_Destiny.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
+ggsave("Fragments_Destiny_Acropora only.tiff", width = 21, height = 10, units = "cm", dpi=1200, compression = "lzw")
 
 ## ==== GENUS ====
 ## Prepare data frame
 ### Get surviving fragments
 deaval.tot.genus <- df2.surv.nd %>% group_by(Genus, Survival) %>% tally()
 deaval.tot.genus <- spread(deaval.tot.genus, key = Survival, value = n)
-names(deaval.tot.genus) <- c("Genus", "Cause.death", "n")
-deaval.tot.genus$Pct <- 0
+deaval.tot.genus$tot <- deaval.tot.genus$`0` + deaval.tot.genus$`1`
+names(deaval.tot.genus) <- c("Genus", "Cause.death", "n", "Pct")
+deaval.tot.genus$Pct <- deaval.tot.genus$n/deaval.tot.genus$Pct*100
 deaval.tot.genus$Cause.death <- "Alive"
+#deaval.tot.genus <- select(deaval.tot.genus, -c("n"))
 
 ### Merge
 deaval.tot.genus <- rbind(deaval.tot.genus, df3.Dead.byGenus)
+deaval.tot.genus <- left_join(deaval.tot.genus, deaval.genus.tot, by = "Genus")
+deaval.tot.genus$Pct <- deaval.tot.genus$n/deaval.tot.genus$n.tot*100
 
 ### Reduce number of categories
 deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Toppled"] <- "Fishing"
@@ -565,13 +696,28 @@ deaval.tot.genus$Cause.death[deaval.tot.genus$Cause.death == "Snails"] <- "Preda
 ### Order
 deaval.tot.genus$Cause.death <- factor(deaval.tot.genus$Cause.death, ordered = TRUE, levels = c("Unknown", "Bleaching", "Fishing", "Turtle", "Competition", "Predation", "Alive"))
 
-
 ## Plot
-
 deaval.tot.genus.tot <- aggregate(deaval.tot.genus$n, by=list(Genus=deaval.tot.genus$Genus), FUN=sum)
 deaval.tot.genus <- left_join(deaval.tot.genus, deaval.tot.genus.tot, by = "Genus")
 deaval.tot.genus$Pct.tot <- deaval.tot.genus$n/ deaval.tot.genus$x
 
+### Post hoc letters
+sigletters.G <- multcomp::cld(hsd.Genus$emmeans, alpha = 0.05, Letters = letters, reversed = FALSE) # get CLD
+
+#### Make order match with summary dataframe
+sigletters.G <- sigletters.G[order(sigletters.G$Genus),]
+sigletters.G <- sigletters.G %>% dplyr::mutate(.group = str_squish(.group)) # remove white spaces
+sigletters.G <- select(sigletters.G, c("Genus", "SE", ".group"))
+sigletters.G$SE <- as.numeric(sigletters.G$SE)
+
+#### Merge sig.letter dataframe into the summary dataframe
+deaval.tot.genus <- left_join(deaval.tot.genus, sigletters.G, by = "Genus")
+deaval.tot.genus$.group <- ifelse(deaval.tot.genus$Cause.death == "Alive", deaval.tot.genus$.group, "")
+deaval.tot.genus$SE <- as.numeric(ifelse(deaval.tot.genus$Cause.death == "Alive", deaval.tot.genus$SE, ""))
+names(deaval.tot.genus)[names(deaval.tot.genus) == ".group"] <- "siglet.loc"
+
+# Plot
+## Test not included: not reliable due to large size differences?
 deaval.plot.genus <- ggplot(deaval.tot.genus, aes(fill=Cause.death, y=Pct.tot, x=Genus)) + 
     geom_bar(position="fill", stat="identity")+
       scale_fill_manual(values = c("#a4a2a8", "#c8d9e5", "#97bad2", "#7492A7", "#d8b4a0",
@@ -580,6 +726,10 @@ deaval.plot.genus <- ggplot(deaval.tot.genus, aes(fill=Cause.death, y=Pct.tot, x
     scale_y_continuous(expand = c(0,0), labels = scales::percent)+
     geom_bar(data=deaval.tot.genus[(deaval.tot.genus$Cause.death=="Alive"),],
       stat = "identity", aes(x = Genus, y = Pct.tot), alpha=0, size=0.8, color="black")+
+  #geom_errorbar(data=deaval.tot.genus[(deaval.tot.genus$Cause.death=="Alive"),], aes(x = Genus, ymin=Pct.tot - SE,
+       #          ymax=Pct.tot + SE), width=.1, size = 0.6)+
+ #  geom_text(data=deaval.tot.genus[(deaval.tot.genus$Cause.death=="Alive"),], aes(x=Genus, y = Pct.tot + SE + 0.05, 
+       #     label = siglet.loc), size = 5, fontface = "bold")+
     theme_economist()+
     theme(
       axis.title.x = element_text(color="black", vjust=-1, size = 14),

@@ -34,8 +34,7 @@ data_summary <- function(data, varname, groupnames){
       n  = length(x[[col]]),
       se = sd(x[[col]], na.rm=TRUE)/sqrt(length(x[[col]])))
   }
-  data_sum<-ddply(data, groupnames, .fun=summary_func,
-                  varname)
+  data_sum <-ddply(data, groupnames, .fun=summary_func, varname)
   data_sum <- plyr::rename(data_sum, c("mean" = varname))
  return(data_sum)
 }
@@ -263,8 +262,7 @@ colnames(df3.BI.years.o)[which(names(df3.BI.years.o) == "sum")] <- "Density.ha"
 # ---- PER GROUP AND SPECIES ----
 
 ## ==== CORALLIVOROUS SNAILS ====
-df3.BI.snail <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") &
-                               Year == 2022 & (Group == "Corallivorous.snails"))  | 
+df3.BI.snail <- subset(df2.selex, ((Treatment == "BRU" | Treatment == "Cage" | Treatment == "Cake" | Treatment == "Compound") & Year == 2022 & (Group == "Corallivorous.snails"))  | 
                                ((Treatment == "Reference (-)" | Treatment == "Reference (+)") & Year >= 2020 & 
                                (Group == "Corallivorous.snails")))
 
@@ -369,13 +367,13 @@ df3.BI.gastro.tot.spec$Density.pct <- df3.BI.gastro.tot.spec$Density.ha.tot / su
 df3.BI.gastro.tot.spec$Genus.o <- ifelse(df3.BI.gastro.tot.spec$Density.pct > 2, df3.BI.gastro.tot.spec$Genus, "Other")
 df3.BI.gastro.tot.spec <- select (df3.BI.gastro.tot.spec, -c(2:4))
 df3.BI.gastro <- left_join(df3.BI.gastro, df3.BI.gastro.tot.spec, by = "Genus")
-df3.BI.gastro.tot.spec$Genus.o <- factor(df3.BI.gastro.tot.spec$Genus.o,  levels=c("Conidae", "Cypraeidae", "Muricidae", "Strombidae", "Turbinellidae", "Other"))
 
 ### Per species
 df3.BI.gastro.spec <- data_summary(df3.BI.gastro, varname = "Density.ha", groupnames = c("Group", "Treatment", "Survey", "Genus.o"))
 df3.BI.gastro.spec <- data_summary(df3.BI.gastro.spec, varname = "sum", groupnames = c("Group", "Treatment", "Genus.o"))
 df3.BI.gastro.spec <- select (df3.BI.gastro.spec, -c(4, 6, 7, 8))
 colnames(df3.BI.gastro.spec)[which(names(df3.BI.gastro.spec) == "sum")] <- "Density.ha"
+df3.BI.gastro.spec$Genus.o <- factor(df3.BI.gastro.spec$Genus.o,  levels=c("Conidae", "Cypraeidae", "Muricidae", "Strombidae", "Turbinellidae", "Other"))
 
 
 ### Merge
@@ -481,25 +479,31 @@ df3.BI.star.spec <- left_join(df3.BI.star.spec, df3.BI.star.tot, by = "Treatment
 ```{r model}
 
 # CORALLIVOROUS SNAILS
+df3.BI.snail.mod <- droplevels(df3.BI.snail.mod) # Remove unused factors (with annoying syntax)
+
 ## Allowing for heterogeneity and square-root transformation both improved residuals
 gls.snail.1wsq  <- gls(sqrt(Density.m2.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.snail.mod)
 
 ## Output
-anova(gls.snail.1wsq)
+Anova(gls.snail.1wsq)
 
 # SEA URCHINS
+df3.BI.urchin.mod <- droplevels(df3.BI.urchin.mod) # Remove unused factors (with annoying syntax)
+
 ## Allowing for heterogeneity and square-root transformation both improved residuals
 gls.urchin.1wsq  <- gls(sqrt(Density.m2.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.urchin.mod)
 
 ## Output
-anova(gls.urchin.1wsq)
+Anova(gls.urchin.1wsq)
 
 # GASTROPODS
+df3.BI.gastro.mod <- droplevels(df3.BI.gastro.mod) # Remove unused factors (with annoying syntax)
+
 ## Allowing for heterogeneity and square-root transformation both improved residuals
 gls.gastro.1wsq  <- gls(sqrt(Density.ha.tot) ~ Treatment, weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.gastro.mod)
 
 ## Output
-anova(gls.gastro.1wsq) # ns
+Anova(gls.gastro.1wsq) # ns
 
 # OCTOPUS
 ## Allowing for heterogeneity and square-root transformation did NOT improve residuals
@@ -509,13 +513,17 @@ gls.octo.1  <- gls(Density.ha ~ Treatment, data = df3.BI.octo)
 anova(gls.octo.1) # ns
 
 # SEA CUCUMBERS
+df3.BI.cucum.mod <- droplevels(df3.BI.cucum.mod) # Remove unused factors (with annoying syntax)
+
 ## Unable to allow for heterogeneity, square-root transformation did improve residuals
 gls.cucum.1sq  <- gls(sqrt(Density.ha.tot) ~ Treatment, data = df3.BI.cucum.mod)
 
 ## Output
-anova(gls.cucum.1sq) # ns
+Anova(gls.cucum.1sq) # ns
 
 # SEA STARS
+df3.BI.star.mod <- droplevels(df3.BI.star.mod) # Remove unused factors (with annoying syntax)
+
 ## Allowing for heterogeneity did NOT, but square-root transformation did improve residuals
 gls.star.1  <- gls(Density.ha.tot ~ Treatment, data = df3.BI.star.mod)
 gls.star.1sq  <- gls(sqrt(Density.ha.tot) ~ Treatment, data = df3.BI.star.mod)
@@ -523,7 +531,7 @@ gls.star.1w  <- gls(Density.ha.tot ~ Treatment,  weights = varIdent(form = ~ 1 |
 gls.star.1wsq  <- gls(sqrt(Density.ha.tot) ~ Treatment,  weights = varIdent(form = ~ 1 | Treatment), data = df3.BI.star.mod)
 
 ## Output
-anova(gls.star.1sq) # ns
+Anova(gls.star.1sq) # ns
 
 ```
 
@@ -793,6 +801,7 @@ snailplot <- ggplot(df3.BI.snail.fig) +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 2.1), breaks = c(0, 1, 2))+
   theme(
     panel.margin.y = unit(0, "cm"),
+    legend.margin=margin(0,0,0,-15),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
@@ -863,16 +872,17 @@ gastroplot <- ggplot(df3.BI.gastro.spec) +
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Gastropods ( ", ha^-1,")")), x = "Treatment", fill = "Family")+
   guides(fill=guide_legend(title="Family"))+
-  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
   scale_y_continuous(expand = c(0, 0), limits = c(0, 299))+
   theme(
     panel.margin.y = unit(0, "cm"),
+    legend.margin=margin(0,0,0,-15),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.x = element_text(size = 13, vjust = -2),
+    axis.text.x = element_text(size = 10, face = "bold", vjust = 0.5),
     axis.title.y = element_text( size = 12, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
@@ -953,6 +963,7 @@ starplot <- ggplot(df3.BI.star.spec) +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 149))+
   theme(
     panel.margin.y = unit(0, "cm"),
+    legend.margin=margin(0,0,0,-15),
     strip.background = element_blank(),
     legend.position = "right",
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),

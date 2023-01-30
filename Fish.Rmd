@@ -253,10 +253,12 @@ names(totsur) <- "SurveyNo"
 ```{r richness}
 
 # ---- DATA PREP ----
+# RICHNESS
 ## Remove colour codings (for non-instataneous data) from Diversity data frame
 div <- select(fish, -c('Coloured'))
 div$SpeciesAbundance <- rowSums(div[, 3:14]) # Sum abundance over all size categories
 div <- div[div$SpeciesAbundance != 0,] # Remove the rows with no abundance
+#divx <- div[!grepl(".*sp$", div$Species),]
 
 ## Make already a grouping, for Diversity analysis on Diet level
 divDiet <- spread(merge(div, specieslist, all.x=T), key = Diet, value = SpeciesAbundance) # Diet from long to wide
@@ -298,6 +300,21 @@ divsumsubtransmeans <- subset(divsum, Observer != "Cindy" & Observer != "Mercy")
 divsumsubtransmeans <- aggregate(S ~ Transect + Study + ReefType, divsumsubtransmeans, mean)
 divsumsubtransmeans <- merge(divsumsubtransmeans, metadata, all.x=T) # Add Patch metadata
 
+# SPECIES LISTS
+## Create data frame
+Specs <- left_join(surveys, div, by = "SurveyNo")
+
+## Select relevant data
+Specs <- subset(Specs, Observer != "Cindy" & Observer != "Mercy" & Study != 2018)
+Specs <- subset(Specs, ReefType == "Ref (-)" | ReefType == "Ref (+)")
+
+## Cleanup
+Specs <- select(Specs, -c("SurveyNo", "Observer", "Date", "Visibility", "Radius", "Area", "Comments"))
+
+## Sum over Study + ReefType + Observer
+Specs.sum <- aggregate(. ~ Study + ReefType + Transect, Specs, sum)
+Specs.sum <- select(Specs.sum, -c("Transect"))
+
 # ---- MODELLING ----
 
 ## ==== 2021 - depth adjusted ====
@@ -313,7 +330,7 @@ AIC(lmer(S ~ Depth_Abs + ReefType + (1|Transect), data = divsumsubmeans.2021),
 lmerSmeancor.2021 <- lmer(S ~ Depth_Abs + ReefType + (1|Transect), data = divsumsubmeans.2021)
 
 ### Main effects for Study and reeftype are significant, interaction is not
-Anova(lmerSmeancor.2021)
+car::Anova(lmerSmeancor.2021)
 summary(lmerSmeancor.2021)
 
 ### Model validation
@@ -415,7 +432,7 @@ Divplot <- ggplot(data = divsumsubmeans.2021.adj, aes(x = ReefType, colour = Ree
     geom_errorbar(data = emmScorsum.2021, width = 0.1, colour='black', size=0.8,
                   aes(y = emmean, ymin = emmean - SE, ymax = emmean + SE))+
     geom_text(data=emmScorsum.2021, 
-              aes(label = .group, y = emmean + 2*SE), colour = 'black', size = 7)+
+              aes(label = .group, y = emmean + 2.2*SE), colour = 'black', size = 7)+
     labs(y = "Fish species richness (S)", x = "Treatment")+
     scale_y_continuous(breaks = c(10, 20, 30))+
     theme_bw()+
@@ -457,6 +474,11 @@ ggplot(data = divsumsubmeans.2020.adj, aes(x = ReefType, colour = ReefType, y = 
 
 ## ==== Throughout the Years ====
 
+divsumsubtransmeans.years$ReefType <- ifelse(divsumsubtransmeans.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(divsumsubtransmeans.years$ReefType == "Ref (+)", "Reference", "Other"))
+emmScorsum.years$ReefType <- ifelse(emmScorsum.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(emmScorsum.years$ReefType == "Ref (+)", "Reference", "Other"))
+
 ### Richness throughout the years plot
 s.years <- ggplot(data = divsumsubtransmeans.years, aes(x = Study, colour = ReefType, y = S))+
     facet_grid(.~ReefType)+
@@ -465,7 +487,7 @@ s.years <- ggplot(data = divsumsubtransmeans.years, aes(x = Study, colour = Reef
     geom_errorbar(data = emmScorsum.years, width = 0.1, colour='black', size=0.8,
                   aes(y = emmean, ymin = emmean - SE, ymax = emmean + SE))+
     geom_text(data=emmScorsum.years, 
-              aes(label = .group, y = emmean + 2*SE), colour = 'black', size = 7)+
+              aes(label = .group, y = emmean + 3*SE), colour = 'black', size = 7)+
     labs(y = "Fish species richness (S)", x = "Treatment")+
     scale_y_continuous(breaks = c(10, 20, 30))+
     theme_bw()+
@@ -562,7 +584,7 @@ lmerBiomeans.2021 <- lmer(log10(Biomass_ha) ~ ReefType + (1|Transect), data = bi
 AIC(lmer(log10(Biomass_ha)~ Depth_Abs + ReefType+ (1|Transect), data=biosumsubmeans.2021),
     lmer(log10(Biomass_ha)~ ReefType+ (1|Transect), data=biosumsubmeans.2021))
 
-Anova(lmerBiomeans.2021)
+car::Anova(lmerBiomeans.2021)
 
 ### Model validation
 mod <- lmerBiomeans.2021 # set model to be validated
@@ -687,19 +709,20 @@ emmBiocorsum.years <- emmBiocorsum.years %>% dplyr::mutate(.group = str_squish(.
 Bioplot <- ggplot(data = biosumsubtransmeans.2021, aes(x = ReefType, y = Biomass_ha, colour = ReefType))+
     geom_jitter(width = 0.2, size = 2)+
     scale_colour_manual(values = co)+
+    scale_x_discrete(expand = c(0, 0.7), labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
     geom_point(data= emmBiosum.2021, aes(y = response), colour = 'black', size = 4)+
     geom_errorbar(data = emmBiosum.2021, width = 0.1, colour='black', size=0.8,
                   aes(y = response, ymin = response - SE, ymax = response + SE))+
-    geom_text(data=emmBiosum.2021, aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
-    labs(y = expression(paste("Fish biomass kg ( ", ha^-1,")")), x = "Treatment")+
+    geom_text(data=emmBiosum.2021, aes(label = .group, y = response + 3.5*SE), colour = 'black', size = 7)+
+    labs(y = expression(paste("Fish biomass (kg ", ha^-1,")")), x = "Treatment")+
     scale_y_continuous(trans = 'log10', breaks = c(10, 100, 1000))+
     coord_cartesian(ylim = c(4, 1001))+
     scale_color_manual(values=co)+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
-          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5),
+          axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
           legend.position="none")
 
 ## ==== 2020  ====
@@ -722,6 +745,11 @@ ggplot(data = biosumsubtransmeans.2020, aes(x = ReefType, y = Biomass_ha, colour
 #ggsave("Fish_Biomass_2020.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
 
 ## ==== Throughout the Years ====
+biosumsubtransmeans.years$ReefType <- ifelse(biosumsubtransmeans.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(biosumsubtransmeans.years$ReefType == "Ref (+)", "Reference", "Other"))
+emmBiocorsum.years$ReefType <- ifelse(emmBiocorsum.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(emmBiocorsum.years$ReefType == "Ref (+)", "Reference", "Other"))
+
 ### Biomass throughout the years plot
 bio.years <- ggplot(data = biosumsubtransmeans.years, aes(x = Study, colour = ReefType, y = Biomass_ha))+
     facet_grid(.~ReefType)+
@@ -730,12 +758,13 @@ bio.years <- ggplot(data = biosumsubtransmeans.years, aes(x = Study, colour = Re
     geom_errorbar(data = emmBiocorsum.years, width = 0.1, colour='black', size=0.8,
                   aes(y = response, ymin = response - SE, ymax = response + SE))+
     geom_text(data=emmBiocorsum.years, 
-              aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
-    labs(y = expression(paste("Fish biomass kg ( ", ha^-1,")")), x = "Year")+
+              aes(label = .group, y = response + 3*SE), colour = 'black', size = 7)+
+    labs(y = expression(paste("Fish biomass (kg ", ha^-1,")")), x = "Year")+
     scale_y_continuous(trans = 'log10', breaks = c(1, 10, 100, 1000))+
+    scale_x_discrete(labels=c('2019', '2020', '2022'))+
     coord_cartesian(ylim = c(1, 1001))+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
           axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5),
@@ -810,21 +839,25 @@ emmBiosum.2021.cor <- emmBiosum.2021.cor %>% dplyr::mutate(.group = str_squish(.
 bio.cor <- ggplot(data = biosumsubtransmeans.2021.cor, aes(x = ReefType, y = Biomass_ha, colour = ReefType))+
     geom_jitter(width = 0.2, size = 2)+
     scale_colour_manual(values = co)+
+    scale_x_discrete(labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
     geom_point(data= emmBiosum.2021.cor, aes(y = response), colour = 'black', size = 4)+
     geom_errorbar(data = emmBiosum.2021.cor, width = 0.1, colour='black', size=0.8,
                   aes(y = response, ymin = response - SE, ymax = response + SE))+
     geom_text(data=emmBiosum.2021.cor, aes(label = .group, y = response + 4*SE), colour = 'black', size = 7)+
-    labs(y = expression(paste("Fish biomass kg ( ", ha^-1,")")), x = "Treatment")+
+    labs(y = expression(paste("Fish biomass (kg ", ha^-1,")")), x = "Treatment")+
     scale_y_continuous(trans = 'log10', breaks = c(1, 10, 100, 1000, 10000))+
     coord_cartesian(ylim = c(1, 10000))+
     scale_color_manual(values=co)+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_text(size = 14, face = "plain", vjust = -0.5),
-          axis.text.x = element_text(size = 14, face = "bold", vjust = 0.5),
+          axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
           legend.position="none")
 #ggsave("Fish_Biomass_ARea corrected.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# Summary values
+biosumsubtransmeans.2021.cor.avg <- data_summary(biosumsubtransmeans.2021.cor, varname = "Biomass_ha", groupnames = c("ReefType"))
 
 ```
 
@@ -849,7 +882,7 @@ bio.ord <- left_join(surveys[, c(1:6)], bio.ord, by = "SurveyNo")
 bio.ord[is.na(bio.ord)] <- 0 # Set all Species to 0 for surveys without observations
 
 ## Select subsets
-bio.ord.years <- subset(bio.ord, ReefType == "Ref (+)")
+bio.ord.years <- subset(bio.ord, ReefType == "Ref (+)" & Study != 2018)
 bio.ord <- subset(bio.ord, Study == 2021 & Observer == "Jelle Rienstra")
 
 ### average over replicate surveys
@@ -905,6 +938,33 @@ pairadonis.Bio.Diet <- pairwise.adonis(BCtable.Bio.Diet, subbcDiet.bio$ReefType,
 
 ### NMDS
 NMDS.Bio.Diet <- metaMDS(subbcDiet.bio[,7:ncol(subbcDiet.bio)], distance = "bray", k = 2, trymax=1000, autotransform = FALSE) 
+
+## ==== Years (Abundance) ====
+### Create a bc mean distance table 
+#### Ref (-)
+Specs.sum.min <- subset(Specs.sum, ReefType == "Ref (-)")
+BCtable.Abu.Years <- vegdist(Specs.sum.min[,3:ncol(Specs.sum.min)], "bray")
+BCtable.Abu.Years.tab <- as.data.frame(meandist(BCtable.Abu.Years, Specs.sum.min$Study, cluster=average))
+
+### Stats
+adonis.Abu.Years <- adonis2(formula = BCtable.Abu.Years ~ Study, data = Specs.sum.min, permutations = 9999)
+pairadonis.Abu.Years <- pairwise.adonis(BCtable.Abu.Years, Specs.sum.min$Study, p.adjust = 'bonferroni', perm = 37000)
+
+### NMDS
+NMDS.Abu.Years <- metaMDS(Specs.sum.min[,3:ncol(Specs.sum.min)], distance = "bray", k = 2, trymax=1000, autotransform = FALSE)
+
+#### Ref (+)
+Specs.sum.plus <- subset(Specs.sum, ReefType == "Ref (+)")
+BCtable.Abu.Years.plus <- vegdist(Specs.sum.plus[,3:ncol(Specs.sum.plus)], "bray")
+BCtable.Abu.Years.tab.plus <- as.data.frame(meandist(BCtable.Abu.Years.plus, Specs.sum.plus$Study, cluster=average))
+
+### Stats
+adonis.Abu.Years.plus <- adonis2(formula = BCtable.Abu.Years.plus ~ Study, data = Specs.sum.plus, permutations = 9999)
+pairadonis.Abu.Years.plus <- pairwise.adonis(BCtable.Abu.Years.plus, Specs.sum.plus$Study, p.adjust = 'bonferroni', perm = 37000)
+
+### NMDS
+NMDS.Abu.Years.plus <- metaMDS(Specs.sum.plus[,3:ncol(Specs.sum.plus)], distance = "bray", k = 2, trymax=1000, autotransform = FALSE) 
+
 
 # ---- PLOTS ----
 
@@ -963,6 +1023,7 @@ invisible(dev.off())
 #Ordi.Sp.Sp <- plot_grid(Ordi.Sp.Sp) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
 
 #### Years ####
+#### Ref (+) Biomass
 ##### Adjust font size based on % of surveys in which a species is seen
 specsizes.bio.years <- bio.ord.years[,7:ncol(bio.ord.years)]
 specsizes.bio.years <- colSums(specsizes.bio.years)
@@ -973,18 +1034,61 @@ cex.bio.years.max <- 2
 specsizes.bio.years <- ((specsizes.bio.years - specsizes.bio.years.min)/(specsizes.bio.years.max-specsizes.bio.years.min)) * (cex.bio.years.max - cex.bio.years.min) + cex.bio.years.min
 
 ##### Plot on Species*Study level
-#tiff("Fish_Ordination species_Species_Years_Biomass.tiff", width = 18, height = 14, units = "cm", res = 1200, compression = "lzw")
+tiff("Fish_Ordination species_Species_Years_Biomass.tiff", width = 18, height = 14, units = "cm", res = 1200, compression = "lzw")
 Ordi.Sp.Sp.years <- ordiplot(NMDS.Bio.Spec.years, type="none",
                              cex = 0.3, ylim = c(-0.3, 0.2), xlim = c(-1.8, 2.1))
 ordiellipse(NMDS.Bio.Spec.years, groups = bio.ord.years$Study, kind = "se", conf = 0.99, draw  ="polygon", 
-            col = co, alpha = 50, label = F, lty = 'blank', border = "white")
+            col = c("#fff07c", "#f2b037", "#fb7600", "#dd3434"), alpha = 50, label = T, lty = 'blank', border = "white")
 ordipointlabel(NMDS.Bio.Spec.years, display = "species", scaling = 9, add = TRUE, cex = specsizes.bio.years)
+dev.off()
+
+#### Ref (-) Abundance
+##### Adjust font size based on % of surveys in which a species is seen
+specsizes.abu.years <- Specs.sum.min[,3:ncol(Specs.sum.min)]
+specsizes.abu.years <- colSums(specsizes.abu.years)
+Specs.sum.min.min <- min(specsizes.abu.years)
+Specs.sum.min.max <- max(specsizes.abu.years)
+cex.abu.years.min <- 0.03
+cex.abu.years.max <- 2
+specsizes.abu.years <- ((specsizes.abu.years - cex.abu.years.min)/(Specs.sum.min.max-Specs.sum.min.min)) * (cex.abu.years.max - cex.abu.years.min) + cex.abu.years.min
+
+##### Plot on Species*Study level
+#tiff("Fish_Ordination species_Species_Years_Abundance.tiff", width = 18, height = 14, units = "cm", res = 1500, compression = "lzw")
+Ordi.Sp.Sp.years.abu <- ordiplot(NMDS.Abu.Years, type="none",
+                             cex = 0.3, ylim = c(-0.3, 0.2), xlim = c(-1.8, 2.1))
+ordiellipse(NMDS.Abu.Years, groups = Specs.sum.min$Study, kind = "se", conf = 0.99, draw  ="polygon", 
+            col = c("#fff07c", "#fb7600", "#dd3434"), alpha = 50, label = T, lty = 'blank', border = "white")
+ordipointlabel(NMDS.Abu.Years, display = "species", scaling = 9, add = TRUE, cex = specsizes.abu.years)
+#dev.off()
+
+#### Ref (+) Abundance
+##### Adjust font size based on % of surveys in which a species is seen
+specsizes.abu.years.plus <- Specs.sum.plus[,3:ncol(Specs.sum.plus)]
+specsizes.abu.years.plus <- colSums(specsizes.abu.years.plus)
+Specs.sum.plus.min <- min(specsizes.abu.years.plus)
+Specs.sum.plus.max <- max(specsizes.abu.years.plus)
+cex.abu.years.plus.min <- 0.03
+cex.abu.years.plus.max <- 2
+specsizes.abu.years.plus <- ((specsizes.abu.years.plus - cex.abu.years.plus.min)/(Specs.sum.plus.max-Specs.sum.plus.min)) * (cex.abu.years.plus.max - cex.abu.years.plus.min) + cex.abu.years.plus.min
+
+##### Plot on Species*Study level
+#tiff("Fish_Ordination species_Species_Years_Abundance.plus.tiff", width = 18, height = 14, units = "cm", res = 1500, compression = "lzw")
+Ordi.Sp.Sp.years.abu.plus <- ordiplot(NMDS.Abu.Years.plus, type="none",
+                             cex = 0.3, ylim = c(-0.3, 0.2), xlim = c(-1.8, 2.1))
+ordiellipse(NMDS.Abu.Years.plus, groups = Specs.sum.plus$Study, kind = "se", conf = 0.99, draw  ="polygon", 
+            col = c("#fff07c", "#fb7600", "#dd3434"), alpha = 50, label = T, lty = 'blank', border = "white")
+ordipointlabel(NMDS.Abu.Years.plus, display = "species", scaling = 9, add = TRUE, cex = specsizes.abu.years.plus)
 #dev.off()
 
 ## ==== Diet ====
 ### On Patch level
 NMDS.Bio.Diet.Patch <- as.data.frame(scores(NMDS.Bio.Diet, display="site"))
-NMDS.Bio.Diet.Patch$Treatment <- subbcDiet.bio$ReefType
+NMDS.Bio.Diet.Patch$Treatment <- ifelse(subbcDiet.bio$ReefType == "BRU", "Bottle",
+                                 ifelse(subbcDiet.bio$ReefType == "Cage", "Cage",       
+                                 ifelse(subbcDiet.bio$ReefType == "Cake", "Cake",       
+                                 ifelse(subbcDiet.bio$ReefType == "Comp", "Compound",       
+                                 ifelse(subbcDiet.bio$ReefType == "Ref (-)", "Control",      
+                                 ifelse(subbcDiet.bio$ReefType == "Ref (+)", "Reference", "Other"))))))
 
 Ordi.Diet.Patch <- ggplot(data = NMDS.Bio.Diet.Patch)+
     stat_ellipse(geom = "polygon", alpha = 0.1, aes(x = NMDS1, y = NMDS2, fill = Treatment),
@@ -1022,6 +1126,7 @@ specsizes.bio.diet <- ((specsizes.bio.diet - specsizes.bio.diet.min)/(specsizes.
 ##### Plot on Species level
 ##### For composite
 cox.diet <- c(co, "#0673B0", "#0673B0", "#0673B0") # Strangely: original colour palette wasn't working here
+
 pdf(NULL)
 dev.control(displaylist="enable")
 par(bg = 'white',   las=1, tck=-0.007, cex.axis=1.1, cex.lab = 1.1, font.axis = 2, mar=c(4.5, 4.2, 0.1, 0.2), 
@@ -1140,7 +1245,7 @@ abusumsubtransmeans.2021 <- subset(abusumsubtransmeans, Study == 2021)
 
 ### Model
 lmerAbumeans.2021 <- lmer(log10(Abundance_m2) ~ ReefType + (1|Transect), data = abusumsubmeans.2021)
-Anova(lmerAbumeans.2021)
+car::Anova(lmerAbumeans.2021)
 
 ### Validation
 mod <- lmerAbumeans.2021 # set model to be validated
@@ -1243,19 +1348,24 @@ Abuplot <- ggplot(data = abusumsubtransmeans.2021, aes(x = ReefType, colour = Re
     geom_errorbar(data = emmAbusum.2021, width = 0.1, colour='black', size=0.8,
                   aes(y = response, ymin = response - SE, ymax = response + SE))+
     geom_text(data=emmAbusum.2021, 
-              aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
+              aes(label = .group, y = response + 3.5*SE), colour = 'black', size = 7)+
     labs(y = expression(paste("Fish abundance ( ", m^-2,")")), x = "Treatment")+
     scale_y_continuous(trans = 'log10', breaks = c(0.1, 1, 10))+
     coord_cartesian(ylim = c(0.05, 11))+
     scale_color_manual(values=co)+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_blank(),
           axis.text.x = element_blank(),
           legend.position="none")
 
 ## ==== Throughout the Years ====
+abusumsubtransmeans.years$ReefType <- ifelse(abusumsubtransmeans.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(abusumsubtransmeans.years$ReefType == "Ref (+)", "Reference", "Other"))
+emmAbucorsum.years$ReefType <- ifelse(emmAbucorsum.years$ReefType == "Ref (-)", "Control", 
+                                      ifelse(emmAbucorsum.years$ReefType == "Ref (+)", "Reference", "Other"))
+
 ### Abundance throughout the years plot
 abu.years <- ggplot(data = abusumsubtransmeans.years, aes(x = Study, colour = ReefType, y = Abundance_m2))+
     facet_grid(.~ReefType)+
@@ -1264,12 +1374,12 @@ abu.years <- ggplot(data = abusumsubtransmeans.years, aes(x = Study, colour = Re
     geom_errorbar(data = emmAbucorsum.years, width = 0.1, colour='black', size=0.8,
                   aes(y = response, ymin = response - SE, ymax = response + SE))+
     geom_text(data=emmAbucorsum.years, 
-              aes(label = .group, y = response + 2*SE), colour = 'black', size = 7)+
+              aes(label = .group, y = response + 5*SE), colour = 'black', size = 7)+
     labs(y = expression(paste("Fish abundance ( ", m^-2,")")))+
     scale_y_continuous(trans = 'log10', breaks = c(0.01, 0.1, 1, 10))+
     coord_cartesian(ylim = c(0.001, 11))+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_blank(),
           axis.text.x = element_blank(),
@@ -1342,12 +1452,15 @@ abu.cor <- ggplot(data = abusumsubtransmeans.2021.cor, aes(x = ReefType, colour 
     coord_cartesian(ylim = c(0.05, 20))+
     scale_color_manual(values=co)+
     theme_bw()+
-    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 3),
+    theme(axis.title.y = element_text(size = 14, face = "plain", vjust = 2.7),
           axis.text.y = element_text(size = 14, face = "bold", vjust = 0.4),
           axis.title.x = element_blank(),
           axis.text.x = element_blank(),
           legend.position="none")
 #ggsave("Fish_Abundance_ARea corrected.tiff", width = 23, height = 14, units = "cm", dpi=1200, compression = "lzw")
+
+# Summary values
+abusumsubtransmeans.2021.cor.avg <- data_summary(abusumsubtransmeans.2021.cor, varname = "Abundance_m2", groupnames = c("ReefType"))
 
 ```
 

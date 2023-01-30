@@ -357,7 +357,7 @@ hist(df2.Patch$Recruits.M2) # Per patch
 lm.T1  <- gls(log10(Recruits.M2) ~ Treatment, method = "REML", data = df2.Patch)
 
 # Model output
-anova(lm.T1)
+car::Anova(lm.T1)
 
 # ---- SUBSTRATE ----
 ## Done per Structure. Averaging per Patch and/or Gamma distribution did not help to solve heavy right skew, so interpret results with caution
@@ -521,7 +521,7 @@ Recruits.TreatxGenus <- ggplot(df3.TreatmentxGenus.fig) +
   theme_economist()+scale_colour_economist()+
   labs(y = expression(paste("Recruits (", m^-2,")")), x = "Treatment")+
   guides(fill=guide_legend(title="Genus"))+
-  scale_x_discrete(expand = c(0, 0.7), labels=c("BRU", "Cage", "Cake", "Comp", "Ref (-)", "Ref (+)"))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("Bottle", "Cage", "Cake", "Compound", "Control", "Reference"))+
   scale_y_continuous(expand = c(0, 0), limits = c(0, 5.6))+
   theme(
     panel.margin.y = unit(0, "cm"),
@@ -531,8 +531,8 @@ Recruits.TreatxGenus <- ggplot(df3.TreatmentxGenus.fig) +
     #legend.key.size = unit(1.1, "lines"),
     legend.title = element_text(size = 12, face = "bold", hjust = 0.3),
     legend.text = element_text(size = 11, face = "italic"),
-    axis.title.x = element_text(size = 14, vjust = -2),
-    axis.text.x = element_text(size = 12, face = "bold", vjust = 0.5),
+    axis.title.x = element_text(size = 13, vjust = -2),
+    axis.text.x = element_text(size = 10, face = "bold", vjust = 0.5),
     axis.title.y = element_text( size = 14, vjust = 3),
     axis.text.y = element_text(size = 12, face = "bold", vjust = 0.4),
     panel.background = element_rect(fill = "#FCFCFC"),
@@ -679,7 +679,7 @@ ggplot(df2.Genus.abu.reef, aes(fill=Reef.type, y=Recruits.M2, x=reorder(Genus.o,
 df2.GenusxOrientation$Orientation <- factor(df2.GenusxOrientation$Orientation, levels = rev(levels(df2.GenusxOrientation$Orientation)))
 ggplot(df2.GenusxOrientation, aes(fill=Orientation, y=sum, x=reorder(Genus.o, -Counts))) + 
     geom_bar(position="fill", stat="identity")+
-    scale_fill_manual(values = c("#90b2ce", "#b3dcff"))+
+    scale_fill_manual(values = c("#90b2ce", "#b3dcff"), name = "Orientation", labels = c("Horizontal", "Vertical"))+
     labs(y = "Recruits", x = "Genus", fill = "Orientation")+
     scale_y_continuous(expand = c(0,0), labels=scales::percent_format())+
     theme_economist()+
@@ -748,19 +748,19 @@ p2 <- ggplot(mapping = aes(x = x, y = y)) +
 # Genus X Substrate plot
 Recruits.SubstratexGenus <- ggplot(df2.GenusxSubstrate) +  
   geom_bar(position = "stack", stat = "identity", aes(x = Substrate, y = Recruits.M2AR, fill = Genus.o))+
-  geom_errorbar(aes(x = Substrate, ymin=Recruits.M2, ymax=Recruits.M2+(1*se)), width=.2, size = 1, position=position_dodge(.9))+
-  geom_text(data = df2.GenusxSubstrate, aes(x=Substrate, y = Recruits.M2 + (1*se), label = siglet.loc), 
-            vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
+  #geom_errorbar(aes(x = Substrate, ymin=Recruits.M2, ymax=Recruits.M2+(1*se)), width=.2, size = 1, #position=position_dodge(.9))+
+  #geom_text(data = df2.GenusxSubstrate, aes(x=Substrate, y = Recruits.M2 + (1*se), label = siglet.loc), 
+  #          vjust= -0.8, hjust = 0.5, size = 5, fontface = "bold", position=position_dodge(.9))+
  geom_bar(data=df2.GenusxSubstrate[(df2.GenusxSubstrate$Genus.o=="Porites"),],
            stat = "identity", aes(x = Substrate, y = Recruits.M2, fill=Genus.o), alpha=0, size=1, color="black")+
   scale_fill_manual("Genus.o", values = c("#ffb55a", "#c86558", "#bd7ebe",
                                           "#ffee65",
                     "#D6FEB5", "#beb9db", "#A9E2F3", "#19b0fc", "#fd7f6f", "#a4a2a8"))+
   theme_economist()+scale_colour_economist()+
-  labs(y = expression(paste("Recruits (", m^-2,")")), x = "Substrate")+
+  labs(y = expression(paste("Recruits (", m^-2,")")), x = "Material type")+
   guides(fill=guide_legend(title="Genus"))+
-  scale_x_discrete(expand = c(0, 0.7))+
-  scale_y_continuous(expand = c(0, 0), limits = c(0,9))+
+  scale_x_discrete(expand = c(0, 0.7), labels=c("Glass", "Concrete", "Iron", "PPR", "PVC"))+
+  scale_y_continuous(expand = c(0, 0), limits = c(0,7))+
   theme(
     panel.margin.y = unit(0, "cm"),
     #strip.text.x = element_text(size = 12, vjust = 2, margin = margin(1.2, 1, 0.1, 0, "cm")),

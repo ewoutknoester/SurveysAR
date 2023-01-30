@@ -17,6 +17,7 @@ library(readxl) # Import excel sheets
 library(tidyverse) # Data manipulation and plotting
 library(writexl) # Export Excel
 
+# Function to get some basics overvies stats (mean, sd, se etc)
 data_summary <- function(data, varname, groupnames){
   require(plyr)
   summary_func <- function(x, col){
@@ -56,6 +57,7 @@ df1.clean <- left_join(df1.clean, labelset, by = "Label")
 colnames(df1.clean)[which(names(df1.clean) == "Structure")] <- "Number"
 colnames(df1.clean)[which(names(df1.clean) == "Treatment")] <- "Structure"
 
+# Rename treatments
 df1.clean$Treatment <- ifelse(grepl("BRU", df1.clean$Patch),  "BRU", 
                        ifelse(grepl("CAKE", df1.clean$Patch), "Cake",
                        ifelse(grepl("CAGE", df1.clean$Patch), "Cage",       
@@ -65,7 +67,7 @@ df1.clean$Treatment <- ifelse(grepl("BRU", df1.clean$Patch),  "BRU",
                        ifelse(grepl("Quadrat", df1.clean$Structure), "Ref (-)",
                        ifelse(grepl("DISK", df1.clean$Structure), "Ref (-)", "Other"))))))))
 
-# EXPORT DATA SELECTION
+# Export clean data
 write_xlsx(df1.clean, "Structural complexity_AR cover_2022-08.xlsx")
 
 ```
@@ -79,10 +81,10 @@ Data info:
 -->
 ```{r data prep}
 
-# Load data
+# Load clean data
 df2.selex <- read_excel("Structural complexity_AR cover_2022-08.xlsx")
 
-# Set order of substrates
+# Set order of substrates (for graphs later)
 df2.selex$Functional.group <- factor(df2.selex$Functional.group,  levels=c("Not applicable", "Soft substrate", "Hard substrate", "EAM", "Other",  "Sponge", "Tunicate", "Hydroid", "Macroalgae", "Soft coral", "Hard coral"))
 
 # Select relevant columns
@@ -92,7 +94,7 @@ df3.ARC <- select(df2.selex, c('Pic', 'Site', 'Treatment', 'Patch', 'Structure',
 df3.ARC <- subset(df3.ARC, Functional.group != "Not applicable")
 df3.ARC$Functional.group <- factor(df3.ARC$Functional.group) # Remove empty factor levels
 
-# Get total counts per survey (not always 50 because `Not applicable` points removed)
+# Get Total counts per survey (not always 50 because `Not applicable` points removed)
 df3.ARC.counts <- df3.ARC %>%
           group_by(Pic) %>%
           tally()
@@ -102,7 +104,7 @@ df3.ARC <- df3.ARC %>%
           group_by(Pic, Site, Treatment, Patch, Structure, Number, Functional.group, .drop = FALSE) %>%
           tally()
 
-# Get cover by dividing Functional group counts/ total counts
+# Get cover by dividing Functional group counts/ Total counts
 df3.ARC <- left_join(df3.ARC, df3.ARC.counts, by = "Pic") # Combine data frames
 df3.ARC$Cover <- df3.ARC$n.x / df3.ARC$n.y * 100 
 
@@ -112,10 +114,10 @@ df3.ARC.Structure <- data_summary(df3.ARC, varname = "Cover",
 df3.ARC.Structure <- select (df3.ARC.Structure, -c("sum", "sd", "n", "se"))
 write_xlsx(df3.ARC.Structure, "Correlation data/Structural complexity_Correlations_AR cover.xlsx")
 
-# Deselect disks (ie focus from here onwards on ARs only)
+# Deselect disks (ie focus from here onward on ARs only)
 df3.ARC.ND <- df3.ARC[df3.ARC$Structure != "DISK", ]
 
-# First summarize per patch (average over all AR structures)
+# First summarize per patch (average over all AR modules within an AR patch)
 df3.ARC.Patch <- data_summary(df3.ARC.ND, varname = "Cover", groupnames = c("Treatment", "Patch", "Functional.group"))
 
 # Then summarize per Treatment (average over all patches)
